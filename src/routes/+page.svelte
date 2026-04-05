@@ -6,6 +6,7 @@
     isScanning,
     librarySize,
     selectedAlbum,
+    scanStatus,
     scanFolder,
   } from '$lib/stores/library';
   import {
@@ -54,16 +55,28 @@
 
   <!-- Album grid -->
   <main class="content">
-    {#if $isScanning}
+    {#if $isScanning && $albums.length === 0}
       <div class="state-msg">
         <div class="spinner"></div>
-        <p>Reading library…</p>
+        <p class="scan-info">
+          {#if $scanStatus.filesScanned > 0}
+            {$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
+          {:else}
+            Starting scan…
+          {/if}
+        </p>
       </div>
     {:else if $albums.length === 0}
       <div class="state-msg">
         <p class="hint">Click <strong>Memory Card</strong> to choose a music folder</p>
       </div>
     {:else}
+      {#if $isScanning}
+        <div class="scan-bar">
+          <div class="spinner-sm"></div>
+          <span>{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums found</span>
+        </div>
+      {/if}
       <AlbumGrid albums={$albums} onselect={selectAlbum} />
     {/if}
   </main>
@@ -193,6 +206,31 @@
 
   .hint { font-size: 14px; }
   .hint strong { color: var(--text-secondary); }
+
+  .scan-info {
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+  }
+
+  .scan-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 2px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .spinner-sm {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(90, 95, 120, 0.2);
+    border-top-color: var(--text-secondary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
 
   .spinner {
     width: 28px;

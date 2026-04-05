@@ -5,6 +5,7 @@ use lofty::tag::ItemKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use tauri::Emitter;
 use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -27,15 +28,27 @@ pub struct Album {
     pub title: String,
     pub artist: String,
     pub year: Option<u32>,
-    pub cover_art: Option<String>, // base64 data URL
+    pub cover_art: Option<String>,
     pub tracks: Vec<Track>,
     pub total_duration: f64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ScanProgress {
+    pub files_scanned: u32,
+    pub albums_found: u32,
+}
+
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "m4a", "aac", "wav", "opus"];
 
-pub fn scan_folder(folder_path: &str) -> Result<Vec<Album>, String> {
+/// Scans folder, emitting events as albums are built up.
+/// Events:
+///   "scan:progress" -> ScanProgress
+///   "scan:album"    -> Album  (emitted when album is complete)
+///   "scan:done"     -> u32 (total album count)
+pub fn scan_folder_streaming(folder_path: &str, app: &tauri::AppHandle) {
     let mut albums: HashMap<String, Album> = HashMap::new();
+    let mut files_scanned: u32 = 0;
 
     for entry in WalkDir::new(folder_path)
         .follow_links(true)
@@ -57,38 +70,62 @@ pub fn scan_folder(folder_path: &str) -> Result<Vec<Album>, String> {
             continue;
         }
 
-        match read_track(path) {
-            Ok(track) => {
-                let album_key = format!("{}::{}", track.album_artist, track.album);
+        files_scanned += 1;
 
-                let album = albums.entry(album_key.clone()).or_insert_with(|| Album {
-                    id: album_key.clone(),
-                    title: track.album.clone(),
-                    artist: track.album_artist.clone(),
-                    year: track.year,
-                    cover_art: None,
-                    tracks: Vec::new(),
-                    total_duration: 0.0,
-                });
+        if let Ok(track) = read_track(path) {
+            let album_key = format!("{}::{}", track.album_artist, track.album);
+            let album = albums.entry(album_key.clone()).or_insert_with(|| Album {
+                id: album_key,
+                title: track.album.clone(),
+                artist: track.album_artist.clone(),
+                year: track.year,
+                cover_art: None,
+                tracks: Vec::new(),
+                total_duration: 0.0,
+            });
 
-                if album.cover_art.is_none() {
-                    album.cover_art = read_cover_art(path);
-                }
-
-                album.total_duration += track.duration;
-                album.tracks.push(track);
+            if album.cover_art.is_none() {
+                album.cover_art = read_cover_art(path);
             }
-            Err(_) => continue,
+
+            album.total_duration += track.duration;
+            album.tracks.push(track);
+        }
+
+        // Emit progress every 10 files
+        if files_scanned % 10 == 0 {
+            let _ = app.emit(
+                "scan:progress",
+                ScanProgress {
+                    files_scanned,
+                    albums_found: albums.len() as u32,
+                },
+            );
         }
     }
 
+    // Sort tracks and emit completed albums
     let mut album_list: Vec<Album> = albums.into_values().collect();
     for album in &mut album_list {
         album.tracks.sort_by_key(|t| (t.disc_number, t.track_number));
     }
     album_list.sort_by(|a, b| a.title.cmp(&b.title));
 
-    Ok(album_list)
+    for album in &album_list {
+        let _ = app.emit("scan:album", album);
+    }
+
+    let _ = app.emit("scan:done", album_list.len() as u32);
+}
+
+pub fn calculate_library_size(folder_path: &str) -> u64 {
+    WalkDir::new(folder_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
 }
 
 fn read_track(path: &Path) -> Result<Track, Box<dyn std::error::Error>> {
@@ -142,19 +179,10 @@ fn read_cover_art(path: &Path) -> Option<String> {
     let tagged_file = Probe::open(path).ok()?.read().ok()?;
     let tag = tagged_file.primary_tag()?;
     let picture = tag.pictures().first()?;
-    let mime = picture.mime_type()
+    let mime = picture
+        .mime_type()
         .map(|m| m.to_string())
         .unwrap_or_else(|| "image/jpeg".to_string());
     let data = STANDARD.encode(picture.data());
     Some(format!("data:{};base64,{}", mime, data))
-}
-
-pub fn calculate_library_size(folder_path: &str) -> u64 {
-    WalkDir::new(folder_path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
-        .sum()
 }

@@ -2,7 +2,7 @@ mod audio;
 mod scanner;
 
 use audio::{create_player, PlaybackState, SharedPlayer};
-use scanner::{calculate_library_size, scan_folder, Album};
+use scanner::{calculate_library_size, scan_folder_streaming, Album};
 use tauri_plugin_dialog::DialogExt;
 
 // ── Dialog command ────────────────────────────────────────────────────────────
@@ -18,13 +18,28 @@ fn pick_folder(app: tauri::AppHandle) -> Option<String> {
 // ── Scanner commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn scan_music_folder(path: String) -> Result<Vec<Album>, String> {
-    scan_folder(&path)
+async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<String, String> {
+    let app_clone = app.clone();
+    let path_clone = path.clone();
+
+    tokio::task::spawn_blocking(move || {
+        scan_folder_streaming(&path_clone, &app_clone);
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let size = tokio::task::spawn_blocking(move || calculate_library_size(&path))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format_size(size))
 }
 
 #[tauri::command]
-fn get_library_size(path: String) -> String {
-    let bytes = calculate_library_size(&path);
+async fn get_library_size(path: String) -> String {
+    let bytes = tokio::task::spawn_blocking(move || calculate_library_size(&path))
+        .await
+        .unwrap_or(0);
     format_size(bytes)
 }
 
