@@ -98,7 +98,7 @@
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(4, 120px);
+    grid-template-columns: repeat(4, 140px);
     grid-template-rows: repeat(3, auto);
     gap: 34px 44px;
   }

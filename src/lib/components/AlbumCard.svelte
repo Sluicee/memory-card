@@ -6,8 +6,6 @@
 
 <button class="card" {onclick}>
   <div class="art-wrap">
-    <!-- Depth layer: shifted back-bottom-right, simulates physical thickness -->
-    <div class="depth"></div>
     <div class="art">
       {#if album.cover_art}
         <img src={album.cover_art} alt={album.title} draggable="false" />
@@ -15,6 +13,10 @@
         <div class="art-placeholder">♪</div>
       {/if}
     </div>
+    <!-- Right edge: y=0→140, no top-right gap -->
+    <div class="edge-r"></div>
+    <!-- Bottom edge: x=0→146, includes corner — no bottom-left gap -->
+    <div class="edge-b"></div>
   </div>
   <span class="title">{album.title}</span>
 </button>
@@ -29,25 +31,14 @@
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    width: 120px;
+    width: 140px;
     flex-shrink: 0;
   }
 
   .art-wrap {
     position: relative;
-    width: 120px;
-    height: 120px;
-  }
-
-  /* The "thickness" — a dark copy of the cover shifted down-right.
-     The parts not covered by .art (right strip + bottom strip) are the visible sides. */
-  .depth {
-    position: absolute;
-    inset: 0;
-    background: rgba(15, 15, 28, 0.75);
-    transform: translate(7px, 7px);
-    /* Right side is slightly lighter than bottom for lighting */
-    box-shadow: inset -2px 0 4px rgba(255,255,255,0.04);
+    width: 140px;
+    height: 140px;
   }
 
   .art {
@@ -55,10 +46,7 @@
     inset: 0;
     background: rgba(90, 95, 120, 0.18);
     overflow: hidden;
-    /* Front-face shadow */
-    box-shadow:
-      0 2px 8px rgba(0, 0, 0, 0.25),
-      0 6px 20px rgba(0, 0, 0, 0.2);
+    box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.22);
   }
 
   .art img {
@@ -74,8 +62,35 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 26px;
+    font-size: 28px;
     color: rgba(90, 95, 120, 0.3);
+  }
+
+  /* Right edge — x: 140→146, y: 0→140, no gap at top-right corner */
+  .edge-r {
+    position: absolute;
+    top: 0;
+    left: 140px;
+    width: 6px;
+    height: 140px;
+    background: linear-gradient(to right,
+      rgba(10, 10, 22, 0.55),
+      rgba(10, 10, 22, 0.25)
+    );
+  }
+
+  /* Bottom edge — x: 0→146, y: 140→145
+     Width covers the corner so no gap at bottom-right either */
+  .edge-b {
+    position: absolute;
+    top: 140px;
+    left: 0;
+    width: 146px;
+    height: 5px;
+    background: linear-gradient(to bottom,
+      rgba(10, 10, 22, 0.50),
+      rgba(10, 10, 22, 0.20)
+    );
   }
 
   .title {
@@ -86,6 +101,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    width: 120px;
+    width: 140px;
   }
 </style>
