@@ -18,11 +18,18 @@
 
   let currentPage = $state(0);
   let scrollCooldown = false;
+  let prevLength = 0;
 
   let totalPages = $derived(Math.max(1, Math.ceil(albums.length / PER_PAGE)));
 
   $effect(() => {
-    if (albums) currentPage = 0;
+    // Reset page only when list is cleared (new scan started), not when albums are appended
+    if (albums.length === 0) {
+      currentPage = 0;
+    } else if (albums.length < prevLength) {
+      currentPage = 0;
+    }
+    prevLength = albums.length;
   });
 
   function nextPage() {
