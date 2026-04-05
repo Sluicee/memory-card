@@ -135,7 +135,7 @@
     height: 100vh;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    padding: 28px 32px 20px;
+    padding: 18px 24px 14px;
   }
 
   /* ── Header ── */
@@ -191,9 +191,10 @@
   /* ── Content ── */
   .content {
     overflow: hidden;
-    padding: 20px 0;
+    padding: 10px 0;
     display: flex;
     flex-direction: column;
+    min-height: 0;
   }
 
   .state-msg {

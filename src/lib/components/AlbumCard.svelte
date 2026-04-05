@@ -24,20 +24,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
-    transition: transform 0.15s ease;
   }
-
-  .card:hover { transform: scale(1.04); }
-  .card:active { transform: scale(0.98); }
 
   .art {
     width: 100%;
     aspect-ratio: 1;
-    border-radius: 6px;
     overflow: hidden;
-    background: rgba(90, 95, 120, 0.15);
+    background: rgba(90, 95, 120, 0.18);
   }
 
   .art img {
@@ -53,12 +48,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 28px;
-    color: rgba(90, 95, 120, 0.35);
+    font-size: 24px;
+    color: rgba(90, 95, 120, 0.3);
   }
 
   .title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-primary);
     text-align: center;
