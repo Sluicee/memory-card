@@ -1,10 +1,23 @@
 <script lang="ts">
   import type { Album } from '../types';
 
-  let { album, onclick }: { album: Album; onclick: () => void } = $props();
+  let {
+    album,
+    onclick,
+    onhover,
+  }: {
+    album: Album;
+    onclick: () => void;
+    onhover: (album: Album | null) => void;
+  } = $props();
 </script>
 
-<button class="card" {onclick}>
+<button
+  class="card"
+  {onclick}
+  onmouseenter={() => onhover(album)}
+  onmouseleave={() => onhover(null)}
+>
   <div class="art-wrap">
     <div class="art">
       {#if album.cover_art}
@@ -13,12 +26,9 @@
         <div class="art-placeholder">♪</div>
       {/if}
     </div>
-    <!-- Right edge: y=0→140, no top-right gap -->
     <div class="edge-r"></div>
-    <!-- Bottom edge: x=0→146, includes corner — no bottom-left gap -->
     <div class="edge-b"></div>
   </div>
-  <span class="title">{album.title}</span>
 </button>
 
 <style>
@@ -30,7 +40,6 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
     width: 140px;
     flex-shrink: 0;
   }
@@ -66,7 +75,6 @@
     color: rgba(90, 95, 120, 0.3);
   }
 
-  /* Right edge — x: 140→146, y: 0→140, no gap at top-right corner */
   .edge-r {
     position: absolute;
     top: 0;
@@ -79,8 +87,6 @@
     );
   }
 
-  /* Bottom edge — x: 0→146, y: 140→145
-     Width covers the corner so no gap at bottom-right either */
   .edge-b {
     position: absolute;
     top: 140px;
@@ -91,16 +97,5 @@
       rgba(10, 10, 22, 0.50),
       rgba(10, 10, 22, 0.20)
     );
-  }
-
-  .title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-primary);
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    width: 140px;
   }
 </style>

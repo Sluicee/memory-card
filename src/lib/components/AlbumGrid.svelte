@@ -9,9 +9,11 @@
   let {
     albums,
     onselect,
+    onhover,
   }: {
     albums: Album[];
     onselect: (album: Album) => void;
+    onhover: (album: Album | null) => void;
   } = $props();
 
   let currentPage = $state(0);
@@ -53,7 +55,7 @@
         <div class="page">
           <div class="grid">
             {#each albums.slice(pageIdx * PER_PAGE, (pageIdx + 1) * PER_PAGE) as album (album.id)}
-              <AlbumCard {album} onclick={() => onselect(album)} />
+              <AlbumCard {album} onclick={() => onselect(album)} onhover={(a) => onhover(a)} />
             {/each}
           </div>
         </div>

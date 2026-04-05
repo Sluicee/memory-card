@@ -19,6 +19,8 @@
   } from '$lib/stores/player';
   import type { Album } from '$lib/types';
 
+  let hoveredAlbum = $state<Album | null>(null);
+
   async function pickFolder() {
     const path = await invoke<string | null>('pick_folder');
     if (path) await scanFolder(path);
@@ -48,9 +50,14 @@
       {/if}
     </div>
 
-    {#if $isScanning}
-      <span class="scanning">Scanning…</span>
-    {/if}
+    <div class="header-right">
+      {#if $isScanning}
+        <span class="scanning">Scanning…</span>
+      {/if}
+      {#if hoveredAlbum}
+        <span class="hovered-title">{hoveredAlbum.title}</span>
+      {/if}
+    </div>
   </header>
 
   <!-- Album grid -->
@@ -77,7 +84,7 @@
           <span>{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums found</span>
         </div>
       {/if}
-      <AlbumGrid albums={$albums} onselect={selectAlbum} />
+      <AlbumGrid albums={$albums} onselect={selectAlbum} onhover={(a) => (hoveredAlbum = a)} />
     {/if}
   </main>
 
@@ -182,10 +189,29 @@
     color: var(--text-secondary);
   }
 
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
   .scanning {
     font-size: 12px;
     color: var(--text-dim);
     letter-spacing: 0.05em;
+  }
+
+  .hovered-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+    animation: fadein 0.15s ease;
+  }
+
+  @keyframes fadein {
+    from { opacity: 0; transform: translateY(-3px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   /* ── Content ── */
