@@ -59,3 +59,8 @@ export async function playPrev(album: Album) {
   const prev = album.tracks[idx - 1];
   if (prev) await playTrack(prev, album);
 }
+
+export async function playShuffled(album: Album) {
+  const shuffled = [...album.tracks].sort(() => Math.random() - 0.5);
+  if (shuffled.length > 0) await playTrack(shuffled[0], album);
+}

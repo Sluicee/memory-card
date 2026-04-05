@@ -1,6 +1,15 @@
 <script lang="ts">
   import type { Album, Track } from '../types';
-  import { currentTrack, isPlaying, playTrack, pause, resume } from '../stores/player';
+  import {
+    currentTrack,
+    isPlaying,
+    isPaused,
+    playTrack,
+    playShuffled,
+    pause,
+    resume,
+  } from '../stores/player';
+  import VolumeControl from './VolumeControl.svelte';
 
   let {
     album,
@@ -10,13 +19,48 @@
     onclose: () => void;
   } = $props();
 
+  // Extract dominant color from album art for tinted overlay
+  let tintColor = $state('rgba(120, 120, 140, 0.28)');
+
+  $effect(() => {
+    if (album.cover_art) {
+      extractDominantColor(album.cover_art).then((c) => (tintColor = c));
+    } else {
+      tintColor = 'rgba(120, 120, 140, 0.28)';
+    }
+  });
+
+  function extractDominantColor(src: string): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 8;
+        canvas.height = 8;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, 8, 8);
+        const data = ctx.getImageData(0, 0, 8, 8).data;
+        let r = 0, g = 0, b = 0;
+        const px = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]; g += data[i + 1]; b += data[i + 2];
+        }
+        resolve(`rgba(${Math.round(r / px)}, ${Math.round(g / px)}, ${Math.round(b / px)}, 0.3)`);
+      };
+      img.src = src;
+    });
+  }
+
+  let isActiveAlbum = $derived($currentTrack && album.tracks.some(t => t.id === $currentTrack!.id));
+  let spinning = $derived(isActiveAlbum && $isPlaying);
+
   function formatDuration(secs: number): string {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  async function handleTrack(track: Track) {
+  async function handleTrackClick(track: Track) {
     if ($currentTrack?.id === track.id) {
       if ($isPlaying) await pause();
       else await resume();
@@ -24,15 +68,33 @@
       await playTrack(track, album);
     }
   }
+
+  async function handlePlayPause() {
+    if (!isActiveAlbum) {
+      await playTrack(album.tracks[0], album);
+    } else if ($isPlaying) {
+      await pause();
+    } else {
+      await resume();
+    }
+  }
+
+  async function handleShuffle() {
+    await playShuffled(album);
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="overlay" onmousedown={(e) => e.target === e.currentTarget && onclose()}>
+<div
+  class="overlay"
+  style="background: {tintColor};"
+  onmousedown={(e) => e.target === e.currentTarget && onclose()}
+>
   <div class="view">
 
-    <!-- Left: large cover with 3D effect -->
+    <!-- Cover with spin -->
     <div class="cover-wrap">
-      <div class="cover-art">
+      <div class="cover-art" class:spinning>
         {#if album.cover_art}
           <img src={album.cover_art} alt={album.title} draggable="false" />
         {:else}
@@ -43,21 +105,31 @@
       <div class="cover-edge-b"></div>
     </div>
 
-    <!-- Right: info + tracklist -->
-    <div class="info">
+    <!-- Info + controls -->
+    <div class="panel">
       <div class="album-meta">
         <h2 class="album-title">{album.title}</h2>
         <p class="album-artist">{album.artist}</p>
-        {#if album.year}
-          <p class="album-year">{album.year}</p>
-        {/if}
+        {#if album.year}<p class="album-year">{album.year}</p>{/if}
       </div>
 
+      <!-- Playback controls -->
+      <div class="controls">
+        <button class="ctrl-btn play" onclick={handlePlayPause}>
+          {#if isActiveAlbum && $isPlaying}⏸{:else}▶{/if}
+        </button>
+        <button class="ctrl-btn shuffle" onclick={handleShuffle} title="Shuffle">
+          ⇄
+        </button>
+        <VolumeControl />
+      </div>
+
+      <!-- Tracklist -->
       <ul class="tracklist">
         {#each album.tracks as track (track.id)}
           {@const active = $currentTrack?.id === track.id}
           <li class="track" class:active>
-            <button class="track-btn" onclick={() => handleTrack(track)}>
+            <button class="track-btn" onclick={() => handleTrackClick(track)}>
               <span class="track-num">
                 {#if active && $isPlaying}
                   <span class="playing-dot">▶</span>
@@ -75,16 +147,20 @@
 
   </div>
 
-  <!-- Bottom hints -->
+  <!-- Bottom PS2 hints (placeholders for gamepad) -->
   <div class="hints">
-    <button class="back-btn" onclick={onclose}>
+    <button class="hint-btn" onclick={onclose}>
       <span class="btn-icon circle">○</span>
       <span>Back</span>
     </button>
-    <span class="hint-item">
+    <div class="hint-item">
       <span class="btn-icon cross">✕</span>
       <span>Play</span>
-    </span>
+    </div>
+    <div class="hint-item">
+      <span class="btn-icon square">□</span>
+      <span>Shuffle</span>
+    </div>
   </div>
 </div>
 
@@ -92,38 +168,31 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(180, 182, 192, 0.55);
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(2px);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 24px;
     z-index: 100;
-    animation: overlay-in 0.25s ease;
+    animation: fade-in 0.2s ease;
   }
 
-  @keyframes overlay-in {
+  @keyframes fade-in {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
 
   .view {
     display: flex;
-    gap: 40px;
+    gap: 44px;
     align-items: flex-start;
-    animation: view-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: slide-in 0.32s cubic-bezier(0.34, 1.4, 0.64, 1);
   }
 
-  @keyframes view-in {
-    from {
-      opacity: 0;
-      transform: perspective(800px) rotateY(-25deg) scale(0.85);
-    }
-    to {
-      opacity: 1;
-      transform: perspective(800px) rotateY(0deg) scale(1);
-    }
+  @keyframes slide-in {
+    from { opacity: 0; transform: perspective(900px) rotateY(-30deg) scale(0.88); }
+    to   { opacity: 1; transform: perspective(900px) rotateY(0deg) scale(1); }
   }
 
   /* ── Cover ── */
@@ -139,9 +208,19 @@
     inset: 0;
     background: rgba(90, 95, 120, 0.18);
     overflow: hidden;
-    box-shadow:
-      4px 6px 10px rgba(0, 0, 0, 0.3),
-      0 16px 40px rgba(0, 0, 0, 0.22);
+    box-shadow: 2px 4px 16px rgba(0, 0, 0, 0.28);
+    transform-origin: center;
+    transition: transform 0.4s ease;
+  }
+
+  /* Continuous Y-axis spin while playing */
+  .cover-art.spinning {
+    animation: spin-y 12s linear infinite;
+  }
+
+  @keyframes spin-y {
+    from { transform: rotateY(0deg); }
+    to   { transform: rotateY(360deg); }
   }
 
   .cover-art img {
@@ -167,10 +246,7 @@
     left: 260px;
     width: 10px;
     height: 260px;
-    background: linear-gradient(to right,
-      rgba(10, 10, 22, 0.6),
-      rgba(10, 10, 22, 0.25)
-    );
+    background: linear-gradient(to right, rgba(10,10,22,0.5), rgba(10,10,22,0.2));
   }
 
   .cover-edge-b {
@@ -178,63 +254,68 @@
     top: 260px;
     left: 0;
     width: 270px;
-    height: 9px;
-    background: linear-gradient(to bottom,
-      rgba(10, 10, 22, 0.55),
-      rgba(10, 10, 22, 0.2)
-    );
+    height: 8px;
+    background: linear-gradient(to bottom, rgba(10,10,22,0.45), rgba(10,10,22,0.15));
   }
 
-  /* ── Info ── */
-  .info {
+  /* ── Panel ── */
+  .panel {
     display: flex;
     flex-direction: column;
-    gap: 20px;
-    width: 300px;
-    max-height: 320px;
+    gap: 16px;
+    width: 280px;
   }
 
-  .album-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
+  .album-meta { display: flex; flex-direction: column; gap: 3px; }
 
   .album-title {
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 600;
     color: var(--text-primary);
     line-height: 1.2;
     margin: 0;
   }
 
-  .album-artist {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin: 0;
+  .album-artist { font-size: 13px; color: var(--text-secondary); margin: 0; }
+  .album-year   { font-size: 11px; color: var(--text-dim); margin: 0; }
+
+  /* ── Controls ── */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
 
-  .album-year {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin: 0;
+  .ctrl-btn {
+    background: rgba(255,255,255,0.45);
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    transition: background 0.15s, transform 0.1s;
   }
+
+  .ctrl-btn:hover { background: rgba(255,255,255,0.65); transform: scale(1.05); }
+  .ctrl-btn:active { transform: scale(0.96); }
+
+  .shuffle { font-size: 18px; color: var(--text-secondary); }
 
   /* ── Tracklist ── */
   .tracklist {
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 0;
     overflow-y: auto;
-    max-height: 240px;
-    padding-right: 4px;
+    max-height: 200px;
   }
 
   .tracklist::-webkit-scrollbar { width: 3px; }
   .tracklist::-webkit-scrollbar-thumb { background: var(--text-dim); }
-
-  .track { display: flex; }
 
   .track-btn {
     display: flex;
@@ -244,60 +325,44 @@
     background: none;
     border: none;
     cursor: pointer;
-    padding: 6px 8px;
+    padding: 5px 6px;
     text-align: left;
     transition: background 0.1s;
   }
 
-  .track-btn:hover {
-    background: rgba(255,255,255,0.3);
-  }
-
-  .track.active .track-btn {
-    background: rgba(255,255,255,0.45);
-  }
+  .track-btn:hover { background: rgba(255,255,255,0.28); }
+  .track.active .track-btn { background: rgba(255,255,255,0.4); }
 
   .track-num {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-dim);
     width: 18px;
     flex-shrink: 0;
     text-align: right;
   }
 
-  .playing-dot {
-    color: var(--text-secondary);
-    font-size: 9px;
-  }
+  .playing-dot { color: var(--text-secondary); font-size: 9px; }
 
   .track-title {
     flex: 1;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .track.active .track-title {
-    font-weight: 600;
-  }
+  .track.active .track-title { font-weight: 600; }
+  .track-dur { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 
-  .track-dur {
-    font-size: 11px;
-    color: var(--text-dim);
-    flex-shrink: 0;
-  }
-
-  /* ── Bottom hints ── */
+  /* ── Hints (gamepad placeholders) ── */
   .hints {
     display: flex;
     align-items: center;
-    gap: 24px;
-    animation: view-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    gap: 20px;
   }
 
-  .back-btn {
+  .hint-btn {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -309,7 +374,7 @@
     padding: 0;
   }
 
-  .back-btn:hover { color: var(--text-primary); }
+  .hint-btn:hover { color: var(--text-primary); }
 
   .hint-item {
     display: flex;
@@ -328,9 +393,10 @@
     justify-content: center;
     font-size: 10px;
     font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18);
   }
 
   .cross  { background: #4a90d9; color: #fff; }
   .circle { background: #d94a4a; color: #fff; }
+  .square { background: #d94aaa; color: #fff; }
 </style>

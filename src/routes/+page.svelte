@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import AlbumGrid from '$lib/components/AlbumGrid.svelte';
   import AlbumView from '$lib/components/AlbumView.svelte';
+  import VolumeControl from '$lib/components/VolumeControl.svelte';
   import {
     albums,
     isScanning,
@@ -31,9 +32,8 @@
     selectedAlbum.set(album);
   }
 
-  async function togglePlayback() {
-    if ($isPlaying) await pause();
-    else await resume();
+  function openCurrentAlbum() {
+    if ($currentAlbum) selectedAlbum.set($currentAlbum);
   }
 </script>
 
@@ -95,7 +95,7 @@
     <button
       class="now-playing"
       class:active={!!$currentTrack}
-      onclick={togglePlayback}
+      onclick={openCurrentAlbum}
       disabled={!$currentTrack}
     >
       <div class="now-playing-art">
@@ -113,6 +113,9 @@
         <span class="play-indicator">{$isPlaying ? '⏸' : '▶'}</span>
       {/if}
     </button>
+
+    <!-- Volume -->
+    <VolumeControl />
 
     <!-- PS2 action hints -->
     <div class="actions">
