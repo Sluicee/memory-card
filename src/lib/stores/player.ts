@@ -29,6 +29,8 @@ export function loadLastTrack(): { track: Track; album: Album } | null {
   } catch { return null; }
 }
 
+// ── Stores ────────────────────────────────────────────────────────────────────
+
 export const currentTrack = writable<Track | null>(null);
 export const currentAlbum = writable<Album | null>(null);
 export const isPlaying    = writable(false);
@@ -36,6 +38,22 @@ export const isPaused     = writable(false);
 export const volume       = writable(loadVolume());
 export const position     = writable(0);
 export const duration     = writable(0);
+export const isShuffled   = writable(false);
+
+// ── Shuffle queue (module-level, not reactive) ────────────────────────────────
+
+type QueueItem = { track: Track; album: Album };
+let _queue: QueueItem[] = [];
+let _qIdx = -1;
+
+function fisherYates<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // ── Polling ───────────────────────────────────────────────────────────────────
 
@@ -47,8 +65,16 @@ function startPolling() {
     if (!get(currentTrack)) return;
     position.set(await invoke<number>('audio_get_position'));
     if (await invoke<boolean>('audio_is_finished')) {
-      const album = get(currentAlbum);
-      if (album) await playNext(album);
+      if (_queue.length > 0) {
+        const next = _qIdx + 1;
+        if (next < _queue.length) {
+          _qIdx = next;
+          await playTrack(_queue[_qIdx].track, _queue[_qIdx].album);
+        }
+      } else {
+        const album = get(currentAlbum);
+        if (album) await playNext(album);
+      }
     }
   }, 1000);
 }
@@ -57,7 +83,7 @@ function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
-// ── Commands ──────────────────────────────────────────────────────────────────
+// ── Commands (unchanged from working version) ─────────────────────────────────
 
 export async function playTrack(track: Track, album: Album) {
   try {
@@ -94,6 +120,7 @@ export async function stop() {
   currentTrack.set(null);
   position.set(0);
   saveLastTrack(null, null);
+  _queue = []; _qIdx = -1; isShuffled.set(false);
   stopPolling();
 }
 
@@ -104,6 +131,11 @@ export async function setVolume(v: number) {
 }
 
 export async function playNext(album: Album) {
+  if (_queue.length > 0) {
+    const next = _qIdx + 1;
+    if (next < _queue.length) { _qIdx = next; await playTrack(_queue[_qIdx].track, _queue[_qIdx].album); }
+    return;
+  }
   const track = get(currentTrack);
   if (!track) return;
   const idx = album.tracks.findIndex((t) => t.id === track.id);
@@ -119,17 +151,33 @@ export async function playPrev(album: Album) {
     position.set(0);
     return;
   }
+  if (_queue.length > 0) {
+    const prev = _qIdx - 1;
+    if (prev >= 0) { _qIdx = prev; await playTrack(_queue[_qIdx].track, _queue[_qIdx].album); }
+    return;
+  }
   const idx = album.tracks.findIndex((t) => t.id === track.id);
   const prev = album.tracks[idx - 1];
   if (prev) await playTrack(prev, album);
 }
 
-export async function playShuffled(album: Album) {
-  const shuffled = [...album.tracks].sort(() => Math.random() - 0.5);
-  if (shuffled.length > 0) await playTrack(shuffled[0], album);
+// ── Shuffle ───────────────────────────────────────────────────────────────────
+
+export async function playShuffledAll(albums: Album[]) {
+  const all: QueueItem[] = albums.flatMap(a => a.tracks.map(t => ({ track: t, album: a })));
+  _queue = fisherYates(all);
+  _qIdx = 0;
+  isShuffled.set(true);
+  if (_queue[0]) await playTrack(_queue[0].track, _queue[0].album);
 }
 
-// Apply saved volume to audio backend
+export async function playShuffled(album: Album) {
+  _queue = fisherYates(album.tracks.map(t => ({ track: t, album })));
+  _qIdx = 0;
+  isShuffled.set(true);
+  if (_queue[0]) await playTrack(_queue[0].track, _queue[0].album);
+}
+
 export async function initVolume() {
   const v = get(volume);
   await invoke('audio_set_volume', { volume: v });

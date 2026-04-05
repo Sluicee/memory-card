@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
+use std::panic;
 
 // Commands sent to the audio thread
 enum Cmd {
@@ -106,24 +107,34 @@ impl AudioPlayer {
                             s.stop();
                         }
                         match File::open(&path) {
-                            Ok(file) => match Decoder::new(BufReader::new(file)) {
-                                Ok(source) => match Sink::try_new(&handle) {
-                                    Ok(s) => {
-                                        let vol = state_thread.lock().unwrap().volume;
-                                        s.set_volume(vol);
-                                        s.append(source);
-                                        let mut st = state_thread.lock().unwrap();
-                                        st.is_playing = true;
-                                        st.is_paused = false;
-                                        st.current_path = Some(path);
-                                        st.duration_secs = duration;
-                                        st.play_started_at = Some(Instant::now());
-                                        st.elapsed_before_pause = 0.0;
-                                        sink = Some(s);
+                            Ok(file) => {
+                                // catch_unwind guards against rodio/symphonia panics on
+                                // certain M4A files (rodio 0.20 bug)
+                                let buf = BufReader::new(file);
+                                let decoder_result = panic::catch_unwind(|| Decoder::new(buf));
+                                let source = match decoder_result {
+                                    Ok(Ok(s)) => Some(s),
+                                    Ok(Err(e)) => { eprintln!("Decoder error: {e}"); None }
+                                    Err(_)     => { eprintln!("Decoder panic on: {path}"); None }
+                                };
+                                if let Some(source) = source {
+                                    match Sink::try_new(&handle) {
+                                        Ok(s) => {
+                                            let vol = state_thread.lock().unwrap().volume;
+                                            s.set_volume(vol);
+                                            s.append(source);
+                                            let mut st = state_thread.lock().unwrap();
+                                            st.is_playing = true;
+                                            st.is_paused = false;
+                                            st.current_path = Some(path);
+                                            st.duration_secs = duration;
+                                            st.play_started_at = Some(Instant::now());
+                                            st.elapsed_before_pause = 0.0;
+                                            sink = Some(s);
+                                        }
+                                        Err(_) => {}
                                     }
-                                    Err(_) => {}
-                                },
-                                Err(_) => {}
+                                }
                             },
                             Err(_) => {}
                         }
