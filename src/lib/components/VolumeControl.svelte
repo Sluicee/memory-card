@@ -8,9 +8,16 @@
   function setLevel(n: number) {
     setVolume(n / STEPS);
   }
+
+  function onWheel(e: WheelEvent) {
+    e.preventDefault();
+    const next = Math.max(0, Math.min(STEPS, level + (e.deltaY < 0 ? 1 : -1)));
+    setLevel(next);
+  }
 </script>
 
-<div class="vol">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="vol" onwheel={onWheel}>
   <span class="vol-label">VOL</span>
   <div class="bars">
     {#each Array(STEPS) as _, i}
@@ -18,7 +25,7 @@
         class="bar"
         class:filled={i < level}
         onclick={() => setLevel(i + 1)}
-        style="height: {7 + i * 2.2}px"
+        style="height: {5 + i * 1.6}px"
         aria-label="Volume {i + 1}"
       ></button>
     {/each}
@@ -48,7 +55,7 @@
   }
 
   .bar {
-    width: 5px;
+    width: 4px;
     background: var(--text-dim);
     border: none;
     cursor: pointer;

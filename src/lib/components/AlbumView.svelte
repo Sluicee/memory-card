@@ -3,7 +3,6 @@
   import {
     currentTrack,
     isPlaying,
-    isPaused,
     playTrack,
     playShuffled,
     pause,
@@ -19,7 +18,6 @@
     onclose: () => void;
   } = $props();
 
-  // Extract dominant color from album art for tinted overlay
   let tintColor = $state('rgba(120, 120, 140, 0.28)');
 
   $effect(() => {
@@ -45,14 +43,13 @@
         for (let i = 0; i < data.length; i += 4) {
           r += data[i]; g += data[i + 1]; b += data[i + 2];
         }
-        resolve(`rgba(${Math.round(r / px)}, ${Math.round(g / px)}, ${Math.round(b / px)}, 0.3)`);
+        resolve(`rgba(${Math.round(r/px)}, ${Math.round(g/px)}, ${Math.round(b/px)}, 0.3)`);
       };
       img.src = src;
     });
   }
 
   let isActiveAlbum = $derived($currentTrack && album.tracks.some(t => t.id === $currentTrack!.id));
-  let spinning = $derived(isActiveAlbum && $isPlaying);
 
   function formatDuration(secs: number): string {
     const m = Math.floor(secs / 60);
@@ -62,25 +59,16 @@
 
   async function handleTrackClick(track: Track) {
     if ($currentTrack?.id === track.id) {
-      if ($isPlaying) await pause();
-      else await resume();
+      if ($isPlaying) await pause(); else await resume();
     } else {
       await playTrack(track, album);
     }
   }
 
   async function handlePlayPause() {
-    if (!isActiveAlbum) {
-      await playTrack(album.tracks[0], album);
-    } else if ($isPlaying) {
-      await pause();
-    } else {
-      await resume();
-    }
-  }
-
-  async function handleShuffle() {
-    await playShuffled(album);
+    if (!isActiveAlbum) await playTrack(album.tracks[0], album);
+    else if ($isPlaying) await pause();
+    else await resume();
   }
 </script>
 
@@ -92,9 +80,9 @@
 >
   <div class="view">
 
-    <!-- Cover with spin -->
+    <!-- Always-spinning cover -->
     <div class="cover-wrap">
-      <div class="cover-art" class:spinning>
+      <div class="cover-art">
         {#if album.cover_art}
           <img src={album.cover_art} alt={album.title} draggable="false" />
         {:else}
@@ -105,7 +93,7 @@
       <div class="cover-edge-b"></div>
     </div>
 
-    <!-- Info + controls -->
+    <!-- Info + tracklist only -->
     <div class="panel">
       <div class="album-meta">
         <h2 class="album-title">{album.title}</h2>
@@ -113,18 +101,6 @@
         {#if album.year}<p class="album-year">{album.year}</p>{/if}
       </div>
 
-      <!-- Playback controls -->
-      <div class="controls">
-        <button class="ctrl-btn play" onclick={handlePlayPause}>
-          {#if isActiveAlbum && $isPlaying}⏸{:else}▶{/if}
-        </button>
-        <button class="ctrl-btn shuffle" onclick={handleShuffle} title="Shuffle">
-          ⇄
-        </button>
-        <VolumeControl />
-      </div>
-
-      <!-- Tracklist -->
       <ul class="tracklist">
         {#each album.tracks as track (track.id)}
           {@const active = $currentTrack?.id === track.id}
@@ -147,20 +123,23 @@
 
   </div>
 
-  <!-- Bottom PS2 hints (placeholders for gamepad) -->
+  <!-- Bottom: gamepad hints (functional) + volume -->
   <div class="hints">
     <button class="hint-btn" onclick={onclose}>
       <span class="btn-icon circle">○</span>
       <span>Back</span>
     </button>
-    <div class="hint-item">
+    <button class="hint-btn" onclick={handlePlayPause}>
       <span class="btn-icon cross">✕</span>
-      <span>Play</span>
-    </div>
-    <div class="hint-item">
+      <span>{isActiveAlbum && $isPlaying ? 'Pause' : 'Play'}</span>
+    </button>
+    <button class="hint-btn" onclick={() => playShuffled(album)}>
       <span class="btn-icon square">□</span>
       <span>Shuffle</span>
-    </div>
+    </button>
+
+    <div class="hints-sep"></div>
+    <VolumeControl />
   </div>
 </div>
 
@@ -203,18 +182,13 @@
     flex-shrink: 0;
   }
 
+  /* Always spinning */
   .cover-art {
     position: absolute;
     inset: 0;
     background: rgba(90, 95, 120, 0.18);
     overflow: hidden;
-    box-shadow: 2px 4px 16px rgba(0, 0, 0, 0.28);
-    transform-origin: center;
-    transition: transform 0.4s ease;
-  }
-
-  /* Continuous Y-axis spin while playing */
-  .cover-art.spinning {
+    box-shadow: 2px 4px 14px rgba(0, 0, 0, 0.25);
     animation: spin-y 12s linear infinite;
   }
 
@@ -279,39 +253,13 @@
   .album-artist { font-size: 13px; color: var(--text-secondary); margin: 0; }
   .album-year   { font-size: 11px; color: var(--text-dim); margin: 0; }
 
-  /* ── Controls ── */
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .ctrl-btn {
-    background: rgba(255,255,255,0.45);
-    border: none;
-    cursor: pointer;
-    font-size: 16px;
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-    transition: background 0.15s, transform 0.1s;
-  }
-
-  .ctrl-btn:hover { background: rgba(255,255,255,0.65); transform: scale(1.05); }
-  .ctrl-btn:active { transform: scale(0.96); }
-
-  .shuffle { font-size: 18px; color: var(--text-secondary); }
-
   /* ── Tracklist ── */
   .tracklist {
     list-style: none;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    max-height: 200px;
+    max-height: 220px;
   }
 
   .tracklist::-webkit-scrollbar { width: 3px; }
@@ -355,34 +303,34 @@
   .track.active .track-title { font-weight: 600; }
   .track-dur { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 
-  /* ── Hints (gamepad placeholders) ── */
+  /* ── Bottom hints ── */
   .hints {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 18px;
+  }
+
+  .hints-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--text-dim);
+    opacity: 0.3;
   }
 
   .hint-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     background: none;
     border: none;
     cursor: pointer;
     font-size: 12px;
     color: var(--text-secondary);
     padding: 0;
+    transition: color 0.15s;
   }
 
   .hint-btn:hover { color: var(--text-primary); }
-
-  .hint-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
 
   .btn-icon {
     width: 20px;
