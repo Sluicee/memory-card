@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import AlbumGrid from '$lib/components/AlbumGrid.svelte';
+  import AlbumView from '$lib/components/AlbumView.svelte';
   import {
     albums,
     isScanning,
@@ -135,6 +136,10 @@
   </footer>
 
 </div>
+
+{#if $selectedAlbum}
+  <AlbumView album={$selectedAlbum} onclose={() => selectedAlbum.set(null)} />
+{/if}
 
 <style>
   .shell {
