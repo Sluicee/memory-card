@@ -223,7 +223,8 @@
     align-items: flex-start;
     justify-content: space-between;
     padding-bottom: 4px;
-    min-height: 52px;
+    height: 68px;
+    flex-shrink: 0;
   }
 
   .header-left {
@@ -275,7 +276,6 @@
     gap: 12px;
     min-width: 0;
     max-width: 50%;
-    overflow: hidden;
   }
 
   .scanning {
@@ -289,11 +289,14 @@
     font-size: 28px;
     color: var(--track-active);
     letter-spacing: 0.01em;
-    white-space: nowrap;
+    text-align: right;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
     min-width: 0;
-    line-height: 1;
+    line-height: 1.15;
     animation: fadein 0.15s ease;
   }
 
