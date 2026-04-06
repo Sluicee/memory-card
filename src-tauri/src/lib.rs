@@ -42,22 +42,34 @@ async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<String
     }
     app.emit("scan:done", ()).ok();
 
-    // Phase 2: async internet cover fetch for albums still missing art
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .unwrap_or_default();
+    // Phase 2: internet cover fetch — fire and forget, doesn't block scan return
+    let app2 = app.clone();
+    tokio::spawn(async move {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .unwrap_or_default();
 
-    for album in &albums {
-        if album.cover_art.is_none() {
-            if let Some(cover_path) = fetch_cover_online(&client, album, &covers_dir).await {
-                app.emit("cover:update", serde_json::json!({
-                    "id": album.id,
-                    "cover_art": cover_path,
-                })).ok();
-            }
-        }
-    }
+        // Fetch in parallel — up to 8 concurrent requests
+        use futures::stream::{self, StreamExt};
+        stream::iter(albums.into_iter().filter(|a| a.cover_art.is_none()))
+            .map(|album| {
+                let client = client.clone();
+                let app2 = app2.clone();
+                let covers_dir = covers_dir.clone();
+                async move {
+                    if let Some(cover_path) = fetch_cover_online(&client, &album, &covers_dir).await {
+                        app2.emit("cover:update", serde_json::json!({
+                            "id": album.id,
+                            "cover_art": cover_path,
+                        })).ok();
+                    }
+                }
+            })
+            .buffer_unordered(8)
+            .collect::<()>()
+            .await;
+    });
 
     let size = tokio::task::spawn_blocking(move || calculate_library_size(&path))
         .await
