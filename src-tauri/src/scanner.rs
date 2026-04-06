@@ -1,9 +1,12 @@
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tauri::Emitter;
 use walkdir::WalkDir;
 
@@ -51,95 +54,17 @@ fn cover_filename(album_id: &str, mime: &str) -> String {
     format!("{:016x}.{}", hash, ext)
 }
 
-/// Scans folder, emitting events as albums are built up.
-/// Events:
-///   "scan:progress" -> ScanProgress
-///   "scan:album"    -> Album  (emitted when album is complete)
-///   "scan:done"     -> u32 (total album count)
-pub fn scan_folder_streaming(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path) {
-    let mut albums: HashMap<String, Album> = HashMap::new();
-    let mut files_scanned: u32 = 0;
-
-    for entry in WalkDir::new(folder_path)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let is_audio = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| AUDIO_EXTENSIONS.contains(&e.to_lowercase().as_str()))
-            .unwrap_or(false);
-
-        if !is_audio {
-            continue;
-        }
-
-        files_scanned += 1;
-
-        if let Ok(track) = read_track(path) {
-            let album_key = format!("{}::{}", track.album_artist, track.album);
-            let album = albums.entry(album_key.clone()).or_insert_with(|| Album {
-                id: album_key,
-                title: track.album.clone(),
-                artist: track.album_artist.clone(),
-                year: track.year,
-                cover_art: None,
-                tracks: Vec::new(),
-                total_duration: 0.0,
-            });
-
-            if album.cover_art.is_none() {
-                album.cover_art = save_cover_art(path, &album.id, covers_dir);
-            }
-
-            album.total_duration += track.duration;
-            album.tracks.push(track);
-        }
-
-        // Emit progress every 10 files
-        if files_scanned % 10 == 0 {
-            let _ = app.emit(
-                "scan:progress",
-                ScanProgress {
-                    files_scanned,
-                    albums_found: albums.len() as u32,
-                },
-            );
-        }
-    }
-
-    // Sort tracks and emit completed albums
-    let mut album_list: Vec<Album> = albums.into_values().collect();
-    for album in &mut album_list {
-        album.tracks.sort_by_key(|t| (t.disc_number, t.track_number));
-    }
-    album_list.sort_by(|a, b| a.title.cmp(&b.title));
-
-    for album in &album_list {
-        let _ = app.emit("scan:album", album);
-    }
-
-    let _ = app.emit("scan:done", album_list.len() as u32);
+/// Result of reading a single audio file. Cover data is returned inline
+/// so the file is opened exactly once per track.
+struct TrackResult {
+    track: Track,
+    /// Raw cover bytes + MIME type, if present in this file's tags.
+    cover: Option<(Vec<u8>, String)>,
 }
 
-pub fn calculate_library_size(folder_path: &str) -> u64 {
-    WalkDir::new(folder_path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
-        .sum()
-}
-
-fn read_track(path: &Path) -> Result<Track, Box<dyn std::error::Error>> {
-    let tagged_file = Probe::open(path)?.read()?;
+/// Opens the audio file once and extracts both track metadata and cover art.
+fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
+    let tagged_file = Probe::open(path).ok()?.read().ok()?;
     let duration = tagged_file.properties().duration().as_secs_f64();
     let path_str = path.to_string_lossy().to_string();
 
@@ -154,45 +79,138 @@ fn read_track(path: &Path) -> Result<Track, Box<dyn std::error::Error>> {
     let title = tag
         .and_then(|t| t.title().as_deref().map(String::from))
         .unwrap_or(file_stem);
-
     let artist = tag
         .and_then(|t| t.artist().as_deref().map(String::from))
         .unwrap_or_else(|| "Unknown Artist".to_string());
-
     let album = tag
         .and_then(|t| t.album().as_deref().map(String::from))
         .unwrap_or_else(|| "Unknown Album".to_string());
-
     let album_artist = tag
         .and_then(|t| t.get_string(&ItemKey::AlbumArtist).map(String::from))
         .unwrap_or_else(|| artist.clone());
-
     let track_number = tag.and_then(|t| t.track()).unwrap_or(0);
     let disc_number = tag.and_then(|t| t.disk()).unwrap_or(1);
     let year = tag.and_then(|t| t.year());
 
-    Ok(Track {
-        id: path_str.clone(),
-        path: path_str,
-        title,
-        artist,
-        album,
-        album_artist,
-        track_number,
-        disc_number,
-        duration,
-        year,
+    // Extract cover from the same TaggedFile — no second open needed
+    let cover = tag
+        .and_then(|t| t.pictures().first())
+        .map(|pic| {
+            let mime = pic.mime_type()
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "image/jpeg".to_string());
+            (pic.data().to_vec(), mime)
+        });
+
+    Some(TrackResult {
+        track: Track {
+            id: path_str.clone(),
+            path: path_str,
+            title,
+            artist,
+            album,
+            album_artist,
+            track_number,
+            disc_number,
+            duration,
+            year,
+        },
+        cover,
     })
 }
 
-/// Saves cover art as a binary image file and returns its path.
-fn save_cover_art(audio_path: &Path, album_id: &str, covers_dir: &Path) -> Option<String> {
-    let tagged_file = Probe::open(audio_path).ok()?.read().ok()?;
-    let tag = tagged_file.primary_tag()?;
-    let picture = tag.pictures().first()?;
-    let mime = picture.mime_type().map(|m| m.to_string()).unwrap_or_else(|| "image/jpeg".to_string());
-    let filename = cover_filename(album_id, &mime);
-    let dest = covers_dir.join(&filename);
-    std::fs::write(&dest, picture.data()).ok()?;
-    Some(dest.to_string_lossy().into_owned())
+/// Scans folder, emitting events as albums are built up.
+/// Events:
+///   "scan:progress" -> ScanProgress
+///   "scan:album"    -> Album  (emitted when album is complete)
+///   "scan:done"     -> ()
+pub fn scan_folder_streaming(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path) {
+    // Phase 1: collect audio paths (fast, sequential)
+    let paths: Vec<PathBuf> = WalkDir::new(folder_path)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path().is_file()
+                && e.path()
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| AUDIO_EXTENSIONS.contains(&x.to_lowercase().as_str()))
+                    .unwrap_or(false)
+        })
+        .map(|e| e.into_path())
+        .collect();
+
+    let total = paths.len() as u32;
+
+    // Phase 2: read metadata in parallel (one file open per track)
+    let files_scanned = Arc::new(AtomicU32::new(0));
+    let app_ref = app.clone();
+    let counter = Arc::clone(&files_scanned);
+
+    let results: Vec<TrackResult> = paths
+        .par_iter()
+        .filter_map(|path| {
+            let result = read_track_and_cover(path);
+            let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if n % 50 == 0 || n == total {
+                app_ref
+                    .emit("scan:progress", ScanProgress { files_scanned: n, albums_found: 0 })
+                    .ok();
+            }
+            result
+        })
+        .collect();
+
+    // Phase 3: group into albums (sequential — avoids mutex contention)
+    let mut albums: HashMap<String, Album> = HashMap::new();
+    for result in results {
+        let TrackResult { track, cover } = result;
+        let album_key = format!("{}::{}", track.album_artist, track.album);
+        let album = albums.entry(album_key.clone()).or_insert_with(|| Album {
+            id: album_key,
+            title: track.album.clone(),
+            artist: track.album_artist.clone(),
+            year: track.year,
+            cover_art: None,
+            tracks: Vec::new(),
+            total_duration: 0.0,
+        });
+
+        // Save cover only for the first track that has one for this album
+        if album.cover_art.is_none() {
+            if let Some((data, mime)) = cover {
+                let filename = cover_filename(&album.id, &mime);
+                let dest = covers_dir.join(&filename);
+                if std::fs::write(&dest, &data).is_ok() {
+                    album.cover_art = Some(dest.to_string_lossy().into_owned());
+                }
+            }
+        }
+
+        album.total_duration += track.duration;
+        album.tracks.push(track);
+    }
+
+    // Phase 4: sort and emit
+    let mut album_list: Vec<Album> = albums.into_values().collect();
+    for album in &mut album_list {
+        album.tracks.sort_by_key(|t| (t.disc_number, t.track_number));
+    }
+    album_list.sort_by(|a, b| a.title.cmp(&b.title));
+
+    for album in &album_list {
+        app.emit("scan:album", album).ok();
+    }
+    app.emit("scan:done", ()).ok();
+}
+
+pub fn calculate_library_size(folder_path: &str) -> u64 {
+    WalkDir::new(folder_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
 }
