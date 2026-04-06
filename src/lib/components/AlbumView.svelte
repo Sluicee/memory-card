@@ -38,6 +38,7 @@
   function extractDominantColor(src: string): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');
         canvas.width = 8;
