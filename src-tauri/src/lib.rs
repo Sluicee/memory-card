@@ -210,6 +210,11 @@ fn audio_stop(player: tauri::State<SharedPlayer>) {
 }
 
 #[tauri::command]
+fn audio_seek(position: f64, player: tauri::State<SharedPlayer>) {
+    player.seek(position);
+}
+
+#[tauri::command]
 fn audio_set_volume(volume: f32, player: tauri::State<SharedPlayer>) {
     player.set_volume(volume);
 }
@@ -247,6 +252,7 @@ pub fn run() {
             audio_pause,
             audio_resume,
             audio_stop,
+            audio_seek,
             audio_set_volume,
             audio_get_state,
             audio_is_finished,

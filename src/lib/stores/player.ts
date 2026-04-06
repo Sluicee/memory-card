@@ -138,6 +138,22 @@ export async function setVolume(v: number) {
   await invoke('audio_set_volume', { volume: v });
 }
 
+export async function seekTo(nextPosition: number) {
+  const track = get(currentTrack);
+  if (!track) return;
+
+  const total = get(duration) || track.duration || 0;
+  const clamped = Math.max(0, Math.min(nextPosition, total));
+  position.set(clamped);
+
+  try {
+    await invoke('audio_seek', { position: clamped });
+  } catch (e) {
+    console.error('Seek failed:', e);
+    position.set(await invoke<number>('audio_get_position'));
+  }
+}
+
 export async function playNext(album: Album) {
   if (_queue.length > 0) {
     const next = _qIdx + 1;

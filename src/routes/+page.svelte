@@ -501,7 +501,7 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    background: var(--card-bg);
+    background: linear-gradient(180deg, rgb(48, 48, 48), rgb(54, 58, 68));
     border: none;
     border-radius: 8px;
     padding: 6px 10px 6px 6px;
