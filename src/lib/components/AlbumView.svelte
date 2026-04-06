@@ -157,6 +157,10 @@
         <span>Next</span>
       </button>
     </div>
+
+    <div class="hints-row hints-row--volume">
+      <VolumeControl />
+    </div>
   </div>
 </div>
 
@@ -354,4 +358,3 @@
   }
 
 </style>
-

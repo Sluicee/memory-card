@@ -62,6 +62,40 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  }
+
+  .art::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.18), transparent 32%),
+      linear-gradient(
+        112deg,
+        transparent 22%,
+        rgba(255, 255, 255, 0.08) 36%,
+        rgba(255, 255, 255, 0.42) 48%,
+        rgba(255, 255, 255, 0.12) 58%,
+        transparent 72%
+      );
+    transform: translateX(-135%);
+    opacity: 0;
+    transition: transform 0.38s ease, opacity 0.2s ease;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+  .card:hover .art,
+  .card:focus-visible .art {
+    box-shadow: 3px 5px 12px rgba(0, 0, 0, 0.28);
+    filter: brightness(1.05) saturate(1.04);
+  }
+
+  .card:hover .art::before,
+  .card:focus-visible .art::before {
+    transform: translateX(115%);
+    opacity: 1;
   }
 
   .art img {
