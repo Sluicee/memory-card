@@ -6,6 +6,7 @@
   import ProgressBar from '$lib/components/ProgressBar.svelte';
   import PS2Btn from '$lib/components/PS2Btn.svelte';
   import OptionsMenu from '$lib/components/OptionsMenu.svelte';
+  import StatsView from '$lib/components/StatsView.svelte';
   import { onMount } from 'svelte';
   import {
     albums,
@@ -34,6 +35,7 @@
 
   let hoveredAlbum = $state<Album | null>(null);
   let optionsOpen  = $state(false);
+  let statsOpen    = $state(false);
   let searchOpen   = $state(false);
   let searchQuery  = $state('');
   let searchInput  = $state<HTMLInputElement | null>(null);
@@ -235,7 +237,11 @@
 {/if}
 
 {#if optionsOpen}
-  <OptionsMenu onclose={() => optionsOpen = false} />
+  <OptionsMenu onclose={() => optionsOpen = false} onStats={() => statsOpen = true} />
+{/if}
+
+{#if statsOpen}
+  <StatsView albums={$albums} onclose={() => statsOpen = false} />
 {/if}
 
 </div><!-- /root -->

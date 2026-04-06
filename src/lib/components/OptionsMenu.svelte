@@ -3,7 +3,7 @@
   import { scanFolder, refreshLibrary, clearLibrary } from '../stores/library';
   import PS2Btn from './PS2Btn.svelte';
 
-  let { onclose }: { onclose: () => void } = $props();
+  let { onclose, onStats }: { onclose: () => void; onStats: () => void } = $props();
 
   async function addFolder() {
     const path = await invoke<string | null>('pick_folder');
@@ -23,10 +23,16 @@
     onclose();
   }
 
+  function openStats() {
+    onclose();
+    onStats();
+  }
+
   const items = [
-    { label: 'Add new folder', action: addFolder },
-    { label: 'Refresh library',         action: refresh  },
-    { label: 'Clear library',         action: clear    },
+    { label: 'Add new folder',  action: addFolder  },
+    { label: 'Refresh library', action: refresh    },
+    { label: 'Statistics',      action: openStats  },
+    { label: 'Clear library',   action: clear      },
   ];
 </script>
 

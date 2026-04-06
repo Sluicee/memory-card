@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import type { Track, Album } from '../types';
+import { recordPlay, recordListened } from './stats';
 
 const VOL_KEY   = 'mp_volume';
 const TRACK_KEY = 'mp_last_track';
@@ -65,6 +66,8 @@ function startPolling() {
     if (!get(currentTrack)) return;
     position.set(await invoke<number>('audio_get_position'));
     if (await invoke<boolean>('audio_is_finished')) {
+      const finished = get(currentTrack);
+      if (finished) recordListened(finished.id, get(duration));
       if (_queue.length > 0) {
         const next = _qIdx + 1;
         if (next < _queue.length) {
@@ -87,8 +90,13 @@ function stopPolling() {
 
 export async function playTrack(track: Track, album: Album) {
   try {
+    // Record listened time for the outgoing track before switching
+    const prevTrack = get(currentTrack);
+    if (prevTrack) recordListened(prevTrack.id, get(position));
+
     await invoke('audio_play', { path: track.path, duration: track.duration });
     currentTrack.set(track);
+    recordPlay(track.id);
     currentAlbum.set(album);
     duration.set(track.duration);
     position.set(0);
