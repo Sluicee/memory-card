@@ -38,7 +38,7 @@ impl MediaControlsManager {
             let original = SetWindowLongPtrW(
                 HWND(hwnd_val as *mut _),
                 GWLP_WNDPROC,
-                wndproc_hook as usize as isize,
+                wndproc_hook as *const () as usize as isize,
             );
             ORIGINAL_WNDPROC = Some(std::mem::transmute(original));
         }
@@ -166,7 +166,7 @@ unsafe extern "system" fn wndproc_hook(
         let hiw = (wparam.0 >> 16) as u16;
         let low = (wparam.0 & 0xFFFF) as u16;
         if hiw == THBN_CLICKED {
-            if let Some(app) = &APP_HANDLE {
+            if let Some(Some(app)) = unsafe { (&raw const APP_HANDLE).as_ref() } {
                 let action = match low {
                     BTN_PREV => "previous",
                     BTN_PLAY_PAUSE => "toggle",

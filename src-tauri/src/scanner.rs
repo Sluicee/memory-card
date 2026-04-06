@@ -160,15 +160,6 @@ fn save_embedded_cover(data: &[u8], mime: &str, album_id: &str, covers_dir: &Pat
     Some(dest.to_string_lossy().into_owned())
 }
 
-/// Write pre-sized cover bytes (e.g. iTunes 600×600) directly without decode.
-pub fn save_cover_bytes(data: &[u8], album_id: &str, covers_dir: &Path) -> Option<String> {
-    let dest = covers_dir.join(cover_filename(album_id, "image/jpeg"));
-    if dest.exists() {
-        return Some(dest.to_string_lossy().into_owned());
-    }
-    std::fs::write(&dest, data).ok()?;
-    Some(dest.to_string_lossy().into_owned())
-}
 
 /// Copy a folder image, resizing to max 600px if needed.
 /// Folder art can be 3000+ px, so we decode and resize.
