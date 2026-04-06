@@ -2,7 +2,7 @@ mod audio;
 mod scanner;
 
 use audio::{create_player, PlaybackState, SharedPlayer};
-use scanner::{calculate_library_size, scan_folder_streaming};
+use scanner::{calculate_library_size, cover_filename, scan_folder, Album};
 use tauri_plugin_dialog::DialogExt;
 use tauri::{Manager, Emitter};
 
@@ -26,19 +26,85 @@ async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<String
     std::fs::create_dir_all(&covers_dir).map_err(|e| e.to_string())?;
 
     let app_clone = app.clone();
+    let covers_clone = covers_dir.clone();
     let path_clone = path.clone();
 
-    tokio::task::spawn_blocking(move || {
-        scan_folder_streaming(&path_clone, &app_clone, &covers_dir);
+    // Phase 1: parallel scan (blocking) — embedded tags + folder images
+    let albums = tokio::task::spawn_blocking(move || {
+        scan_folder(&path_clone, &app_clone, &covers_clone)
     })
     .await
     .map_err(|e| e.to_string())?;
+
+    // Emit all albums immediately so the UI renders
+    for album in &albums {
+        app.emit("scan:album", album).ok();
+    }
+    app.emit("scan:done", ()).ok();
+
+    // Phase 2: async internet cover fetch for albums still missing art
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_default();
+
+    for album in &albums {
+        if album.cover_art.is_none() {
+            if let Some(cover_path) = fetch_cover_online(&client, album, &covers_dir).await {
+                app.emit("cover:update", serde_json::json!({
+                    "id": album.id,
+                    "cover_art": cover_path,
+                })).ok();
+            }
+        }
+    }
 
     let size = tokio::task::spawn_blocking(move || calculate_library_size(&path))
         .await
         .map_err(|e| e.to_string())?;
 
     Ok(format_size(size))
+}
+
+async fn fetch_cover_online(
+    client: &reqwest::Client,
+    album: &Album,
+    covers_dir: &std::path::Path,
+) -> Option<String> {
+    let query = format!("{} {}", album.artist, album.title);
+
+    let resp: serde_json::Value = client
+        .get("https://itunes.apple.com/search")
+        .query(&[
+            ("term", query.as_str()),
+            ("media", "music"),
+            ("entity", "album"),
+            ("limit", "1"),
+        ])
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    // artworkUrl100 → replace with 600x600
+    let artwork_url = resp["results"][0]["artworkUrl100"]
+        .as_str()?
+        .replace("100x100bb", "600x600bb");
+
+    let img_bytes = client
+        .get(&artwork_url)
+        .send()
+        .await
+        .ok()?
+        .bytes()
+        .await
+        .ok()?;
+
+    let dest = covers_dir.join(cover_filename(&album.id, "image/jpeg"));
+    std::fs::write(&dest, &img_bytes).ok()?;
+    Some(dest.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

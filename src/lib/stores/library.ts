@@ -23,6 +23,13 @@ export const scanStatus    = writable({ filesScanned: 0, albumsFound: 0 });
 
 export const albumCount = derived(albums, ($a) => $a.length);
 
+// Persistent listener: cover art found online after initial scan
+listen<{ id: string; cover_art: string }>('cover:update', (e) => {
+  albums.update((a) =>
+    a.map((album) => album.id === e.payload.id ? { ...album, cover_art: e.payload.cover_art } : album)
+  );
+});
+
 // ── Cache persistence ─────────────────────────────────────────────────────────
 
 async function saveCache() {
