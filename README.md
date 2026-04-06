@@ -1,4 +1,4 @@
-# PS2 Music Player
+# Memory Card
 
 A desktop music player with a retro PS2/CRT aesthetic, built with Tauri 2, SvelteKit 5, and Rust.
 
