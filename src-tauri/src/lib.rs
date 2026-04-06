@@ -2,7 +2,7 @@ mod audio;
 mod scanner;
 
 use audio::{create_player, PlaybackState, SharedPlayer};
-use scanner::{calculate_library_size, save_cover_bytes, scan_folder, Album};
+use scanner::{calculate_library_size, cover_filename, save_cover_bytes, scan_folder, Album};
 use tauri_plugin_dialog::DialogExt;
 use tauri::{Manager, Emitter};
 
@@ -83,6 +83,12 @@ async fn fetch_cover_online(
     album: &Album,
     covers_dir: &std::path::Path,
 ) -> Option<String> {
+    // Skip if already cached from a previous scan
+    let dest = covers_dir.join(cover_filename(&album.id, "image/jpeg"));
+    if dest.exists() {
+        return Some(dest.to_string_lossy().into_owned());
+    }
+
     let query = format!("{} {}", album.artist, album.title);
 
     let resp: serde_json::Value = client

@@ -150,20 +150,27 @@ fn find_folder_cover(audio_path: &Path, album_id: &str, covers_dir: &Path) -> Op
 }
 
 /// Decode, resize to max 600px, and save as JPEG to covers_dir.
-/// Used for embedded tag art, folder images, and internet-fetched covers.
+/// Skips processing if the destination already exists (fast rescan).
 pub fn save_cover_bytes(data: &[u8], album_id: &str, covers_dir: &Path) -> Option<String> {
+    let dest = covers_dir.join(cover_filename(album_id, "image/jpeg"));
+    if dest.exists() {
+        return Some(dest.to_string_lossy().into_owned());
+    }
     let img = image::load_from_memory(data).ok()?;
     let img = if img.width() > 600 || img.height() > 600 {
         img.resize(600, 600, image::imageops::FilterType::Triangle)
     } else {
         img
     };
-    let dest = covers_dir.join(cover_filename(album_id, "image/jpeg"));
     img.save_with_format(&dest, image::ImageFormat::Jpeg).ok()?;
     Some(dest.to_string_lossy().into_owned())
 }
 
 fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option<String> {
+    let dest = covers_dir.join(cover_filename(album_id, "image/jpeg"));
+    if dest.exists() {
+        return Some(dest.to_string_lossy().into_owned());
+    }
     let data = std::fs::read(src).ok()?;
     save_cover_bytes(&data, album_id, covers_dir)
 }
