@@ -35,26 +35,29 @@
     }
   });
 
-  function extractDominantColor(src: string): Promise<string> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 8;
-        canvas.height = 8;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, 8, 8);
-        const data = ctx.getImageData(0, 0, 8, 8).data;
-        let r = 0, g = 0, b = 0;
-        const px = data.length / 4;
-        for (let i = 0; i < data.length; i += 4) {
-          r += data[i]; g += data[i + 1]; b += data[i + 2];
-        }
-        resolve(`rgba(${Math.round(r/px)}, ${Math.round(g/px)}, ${Math.round(b/px)}, 0.5)`);
-      };
-      img.src = src;
-    });
+  async function extractDominantColor(src: string): Promise<string> {
+    const fallback = 'rgba(120, 120, 140, 0.28)';
+    try {
+      // createImageBitmap with resize decodes off the main thread — no freeze
+      const bitmap = await createImageBitmap(
+        await fetch(src).then((r) => r.blob()),
+        { resizeWidth: 8, resizeHeight: 8, resizeQuality: 'low' }
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const data = ctx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      const px = data.length / 4;
+      for (let i = 0; i < data.length; i += 4) {
+        r += data[i]; g += data[i + 1]; b += data[i + 2];
+      }
+      return `rgba(${Math.round(r / px)}, ${Math.round(g / px)}, ${Math.round(b / px)}, 0.5)`;
+    } catch {
+      return fallback;
+    }
   }
 
   let isActiveAlbum = $derived($currentTrack && album.tracks.some(t => t.id === $currentTrack!.id));

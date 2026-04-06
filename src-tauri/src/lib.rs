@@ -2,7 +2,7 @@ mod audio;
 mod scanner;
 
 use audio::{create_player, PlaybackState, SharedPlayer};
-use scanner::{calculate_library_size, cover_filename, scan_folder, Album};
+use scanner::{calculate_library_size, save_cover_bytes, scan_folder, Album};
 use tauri_plugin_dialog::DialogExt;
 use tauri::{Manager, Emitter};
 
@@ -114,9 +114,7 @@ async fn fetch_cover_online(
         .await
         .ok()?;
 
-    let dest = covers_dir.join(cover_filename(&album.id, "image/jpeg"));
-    std::fs::write(&dest, &img_bytes).ok()?;
-    Some(dest.to_string_lossy().into_owned())
+    save_cover_bytes(&img_bytes, &album.id, covers_dir)
 }
 
 #[tauri::command]

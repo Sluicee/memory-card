@@ -48,9 +48,13 @@
     scene.add(mesh);
 
     if (src) {
-      const loader = new THREE.TextureLoader();
-      loader.load(src, (tex) => {
+      // ImageBitmapLoader decodes off the main thread — no freeze for large images
+      const loader = new THREE.ImageBitmapLoader();
+      loader.setOptions({ imageOrientation: 'flipY' });
+      loader.load(src, (bitmap) => {
+        const tex = new THREE.Texture(bitmap);
         tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
         const frontMat = new THREE.MeshStandardMaterial({ map: tex });
         const texBack = tex.clone();
         texBack.repeat.set(-1, 1);

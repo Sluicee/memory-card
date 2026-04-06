@@ -149,12 +149,23 @@ fn find_folder_cover(audio_path: &Path, album_id: &str, covers_dir: &Path) -> Op
     None
 }
 
-fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option<String> {
-    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-    let mime = if ext.eq_ignore_ascii_case("png") { "image/png" } else { "image/jpeg" };
-    let dest = covers_dir.join(cover_filename(album_id, mime));
-    std::fs::copy(src, &dest).ok()?;
+/// Decode, resize to max 600px, and save as JPEG to covers_dir.
+/// Used for embedded tag art, folder images, and internet-fetched covers.
+pub fn save_cover_bytes(data: &[u8], album_id: &str, covers_dir: &Path) -> Option<String> {
+    let img = image::load_from_memory(data).ok()?;
+    let img = if img.width() > 600 || img.height() > 600 {
+        img.resize(600, 600, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+    let dest = covers_dir.join(cover_filename(album_id, "image/jpeg"));
+    img.save_with_format(&dest, image::ImageFormat::Jpeg).ok()?;
     Some(dest.to_string_lossy().into_owned())
+}
+
+fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option<String> {
+    let data = std::fs::read(src).ok()?;
+    save_cover_bytes(&data, album_id, covers_dir)
 }
 
 /// Scan a folder and return all albums with embedded or folder-based cover art.
@@ -217,12 +228,9 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
         });
 
         if album.cover_art.is_none() {
-            // 1. Embedded tag cover
-            if let Some((data, mime)) = cover {
-                let dest = covers_dir.join(cover_filename(&album.id, &mime));
-                if std::fs::write(&dest, &data).is_ok() {
-                    album.cover_art = Some(dest.to_string_lossy().into_owned());
-                }
+            // 1. Embedded tag cover — resize to max 600px on save
+            if let Some((data, _mime)) = cover {
+                album.cover_art = save_cover_bytes(&data, &album.id, covers_dir);
             }
             // 2. Folder image (if no embedded cover)
             if album.cover_art.is_none() {
