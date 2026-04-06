@@ -1,6 +1,7 @@
 mod audio;
 mod scanner;
 mod media_controls;
+mod discord_rpc;
 
 use audio::{create_player, PlaybackState, SharedPlayer};
 use media_controls::MediaControlsManager;
@@ -269,12 +270,11 @@ fn audio_get_position(player: tauri::State<SharedPlayer>) -> f64 {
 fn update_media_metadata(
     title: String,
     artist: String,
-    album: String,
     cover_url: Option<String>,
     duration_ms: u64,
     media_controls: State<'_, MediaControlsManager>,
 ) {
-    media_controls.inner().update_metadata(&title, &artist, &album, cover_url.as_deref(), duration_ms);
+    media_controls.inner().update_metadata(&title, &artist, cover_url.as_deref(), duration_ms);
 }
 
 #[tauri::command]

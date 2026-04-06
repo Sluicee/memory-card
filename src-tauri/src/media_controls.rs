@@ -1,9 +1,8 @@
+use crate::discord_rpc::DiscordManager;
 use souvlaki::{MediaControls, MediaPlayback, MediaPosition, PlatformConfig};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-// use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
-// use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList, THUMBBUTTON, THUMBBUTTONMASK, THUMBBUTTONFLAGS};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, RegisterWindowMessageW, SetWindowLongPtrW, GWLP_WNDPROC, WM_COMMAND, WNDPROC,
 };
@@ -19,9 +18,19 @@ static mut ORIGINAL_WNDPROC: Option<WNDPROC> = None;
 static mut APP_HANDLE: Option<AppHandle> = None;
 static mut TASKBAR_CREATED_MSG: u32 = 0;
 
+#[derive(Default, Clone)]
+struct TrackMetadata {
+    title: String,
+    artist: String,
+    duration_ms: u64,
+}
+
 pub struct MediaControlsManager {
     controls: Arc<Mutex<Option<MediaControls>>>,
     hwnd: isize,
+    discord: DiscordManager,
+    current_metadata: Arc<Mutex<TrackMetadata>>,
+    current_playback: Arc<Mutex<(bool, u64)>>, // (is_playing, position_ms)
 }
 
 unsafe impl Send for MediaControlsManager {}
@@ -46,6 +55,9 @@ impl MediaControlsManager {
         let mut manager = Self {
             controls: Arc::new(Mutex::new(None)),
             hwnd: hwnd_val,
+            discord: DiscordManager::new(),
+            current_metadata: Arc::new(Mutex::new(TrackMetadata::default())),
+            current_playback: Arc::new(Mutex::new((false, 0))),
         };
 
         manager.init_smtc(app);
@@ -95,6 +107,12 @@ impl MediaControlsManager {
     }
 
     pub fn update_playback(&self, is_playing: bool, position_ms: u64) {
+        {
+            let mut play_lock = self.current_playback.lock().unwrap();
+            *play_lock = (is_playing, position_ms);
+        }
+        self.update_discord();
+
         if let Some(controls) = self.controls.lock().unwrap().as_mut() {
             let state = if is_playing {
                 MediaPlayback::Playing {
@@ -113,10 +131,18 @@ impl MediaControlsManager {
         &self,
         title: &str,
         artist: &str,
-        album: &str,
+        // album: &str,
         cover_url: Option<&str>,
         duration_ms: u64,
     ) {
+        {
+            let mut meta_lock = self.current_metadata.lock().unwrap();
+            meta_lock.title = title.to_string();
+            meta_lock.artist = artist.to_string();
+            meta_lock.duration_ms = duration_ms;
+        }
+        self.update_discord();
+
         if let Some(controls) = self.controls.lock().unwrap().as_mut() {
             // Copy cover to a temporary file in %TEMP% to ensure SMTC/Windows Widget 
             // has permission to access it. Windows is notoriously picky about AppData files.
@@ -131,7 +157,6 @@ impl MediaControlsManager {
             let metadata = souvlaki::MediaMetadata {
                 title: Some(title),
                 artist: Some(artist),
-                album: Some(album),
                 cover_url: final_cover_url,
                 duration: Some(std::time::Duration::from_millis(duration_ms)),
                 ..Default::default()
@@ -139,6 +164,23 @@ impl MediaControlsManager {
 
             let _ = controls.set_metadata(metadata);
         }
+    }
+
+    fn update_discord(&self) {
+        let meta = self.current_metadata.lock().unwrap();
+        let (is_playing, position_ms) = *self.current_playback.lock().unwrap();
+
+        if meta.title.is_empty() {
+            return;
+        }
+
+        self.discord.update_presence(
+            &meta.title,
+            &meta.artist,
+            is_playing,
+            position_ms,
+            meta.duration_ms,
+        );
     }
 }
 
