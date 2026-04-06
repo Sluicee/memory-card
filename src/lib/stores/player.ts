@@ -116,9 +116,20 @@ export async function pause() {
 }
 
 export async function resume() {
+  const track = get(currentTrack);
+  const album = get(currentAlbum);
+
+  // If we have a track/album but are neither playing nor paused (initial state after restart),
+  // we need to call playTrack to initialize the backend sink.
+  if (track && album && !get(isPlaying) && !get(isPaused)) {
+    await playTrack(track, album);
+    return;
+  }
+
   await invoke('audio_resume');
   isPlaying.set(true);
   isPaused.set(false);
+  startPolling();
 }
 
 export async function stop() {

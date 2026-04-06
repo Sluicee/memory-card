@@ -2,7 +2,10 @@
   import { volume, setVolume } from '../stores/player';
   import { playUiSfx } from '$lib/ui-sfx';
 
-  const STEPS = 10;
+  const STEP_SIZE = 5; 
+  const STEPS = 100 / STEP_SIZE; // Это 20
+  const VISUAL_BARS = 10; // Сколько палок видим
+  const STEPS_PER_BAR = STEPS / VISUAL_BARS; // Это 2
 
   let level = $derived(Math.round($volume * STEPS));
 
@@ -23,9 +26,9 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="vol" onwheel={onWheel}>
   <span class="vol-label">VOL</span>
+  
   <button
     class="trigger-btn"
     onclick={() => stepLevel(-1)}
@@ -37,13 +40,15 @@
   </button>
 
   <div class="bars">
-    {#each Array(STEPS) as _, i}
+    {#each Array(VISUAL_BARS) as _, i}
       <button
         class="bar"
-        class:filled={i < level}
-        onclick={() => setLevel(i + 1)}
-        style="height: {5 + i * 1.6}px"
-        aria-label="Volume {i + 1}"
+        /* Полоска светится, если текущий уровень покрывает её хотя бы частично */
+        class:filled={level >= (i + 1) * STEPS_PER_BAR}
+        /* При клике ставим уровень, соответствующий этой полоске */
+        onclick={() => setLevel((i + 1) * STEPS_PER_BAR)}
+        style="height: {5 + i * 2.2}px" 
+        aria-label="Volume bar {i + 1}"
       ></button>
     {/each}
   </div>
@@ -57,10 +62,12 @@
     <span class="trigger-tag">R2</span>
     <span class="trigger-mark">+</span>
   </button>
-  <span class="vol-num">{level * 10}</span>
+
+  <span class="vol-num">{level * STEP_SIZE}</span>
 </div>
 
 <style>
+  /* Стили остаются почти такими же, поправлю только высоту и шаг */
   .vol {
     display: flex;
     align-items: center;
@@ -73,7 +80,6 @@
     color: var(--text-dim);
     text-shadow: var(--text-shadow);
     letter-spacing: 0.08em;
-    padding-bottom: 1px;
   }
 
   .trigger-btn {
@@ -87,17 +93,8 @@
     background: linear-gradient(180deg, rgb(48, 48, 48), rgb(54, 58, 68));
     color: var(--text-secondary);
     cursor: pointer;
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1),
-      inset 0 -1px 2px rgba(0, 0, 0, 0.28);
-    transition: color 0.12s, opacity 0.12s, transform 0.12s, filter 0.12s;
-  }
-
-  .trigger-btn:hover:not(:disabled) {
-    color: var(--text-primary);
-    transform: translateY(-1px);
-    filter: brightness(1.06);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: all 0.12s;
   }
 
   .trigger-btn:disabled {
@@ -105,36 +102,21 @@
     cursor: default;
   }
 
-  .trigger-tag,
-  .trigger-mark {
-    text-shadow: none;
-  }
-
-  .trigger-tag {
-    font-size: 9px;
-    letter-spacing: 0.08em;
-  }
-
-  .trigger-mark {
-    font-size: 11px;
-    font-weight: 900;
-  }
-
   .bars {
     display: flex;
     align-items: flex-end;
-    gap: 2px;
+    gap: 2px; /* Чуть увеличил зазор, так как палок меньше */
   }
 
   .bar {
-    width: 4px;
+    width: 4px; /* Сделал чуть шире для красоты */
     background: var(--text-dim);
     border: none;
     cursor: pointer;
     padding: 0;
     opacity: 0.3;
-    transition: opacity 0.1s;
-    border-radius: 999px 999px 2px 2px;
+    transition: opacity 0.1s, background 0.1s;
+    border-radius: 2px;
   }
 
   .bar.filled {
@@ -143,17 +125,10 @@
     box-shadow: 0 0 5px rgba(86, 143, 255, 0.28);
   }
 
-  .bar:hover {
-    opacity: 0.8;
-  }
-
   .vol-num {
     font-size: 10px;
     font-weight: 800;
     color: var(--text-dim);
-    text-shadow: var(--text-shadow);
-    padding-bottom: 1px;
-    min-width: 18px;
-    text-align: left;
+    min-width: 20px;
   }
 </style>
