@@ -15,8 +15,7 @@
         "title": "Memory Card",
         "width": 950,
         "height": 900,
-        "resizable": false,
-        "center": true
+        "resizable": false
       }
     ],
     "security": {
