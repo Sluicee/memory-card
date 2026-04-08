@@ -45,6 +45,23 @@ export const position          = writable(0);
 export const duration          = writable(0);
 export const isShuffled        = writable(false);
 
+export type RepeatMode = 'none' | 'one' | 'all';
+export const repeatMode = writable<RepeatMode>('none');
+
+export function toggleRepeat() {
+  const modes: RepeatMode[] = ['none', 'one', 'all'];
+  const cur = get(repeatMode);
+  const next = modes[(modes.indexOf(cur) + 1) % modes.length];
+  repeatMode.set(next);
+  // Repeat One and Shuffle are mutually exclusive
+  if (next === 'one') {
+    _queue = [];
+    _qIdx = -1;
+    isShuffled.set(false);
+    currentPlaylistId.set(null);
+  }
+}
+
 // ── Shuffle queue (module-level, not reactive) ────────────────────────────────
 
 export type QueueItem = { track: Track; album: Album };
@@ -72,11 +89,19 @@ function startPolling() {
     if (await invoke<boolean>('audio_is_finished')) {
       const finished = get(currentTrack);
       if (finished) recordListened(finished.id, get(duration));
-      if (_queue.length > 0) {
+      const rm = get(repeatMode);
+      if (rm === 'one') {
+        const track = get(currentTrack);
+        const album = get(currentAlbum);
+        if (track && album) await playTrack(track, album, _queue.length > 0);
+      } else if (_queue.length > 0) {
         const next = _qIdx + 1;
         if (next < _queue.length) {
           _qIdx = next;
           await playTrack(_queue[_qIdx].track, _queue[_qIdx].album, true);
+        } else if (rm === 'all') {
+          _qIdx = 0;
+          await playTrack(_queue[0].track, _queue[0].album, true);
         } else {
           // Queue exhausted — stop cleanly, keep track info for display
           _queue = [];
@@ -90,7 +115,16 @@ function startPolling() {
         }
       } else {
         const album = get(currentAlbum);
-        if (album) await playNext(album);
+        if (album) {
+          if (rm === 'all') {
+            const track = get(currentTrack);
+            const idx = album.tracks.findIndex(t => t.id === track?.id);
+            const nextIdx = (idx + 1) % album.tracks.length;
+            await playTrack(album.tracks[nextIdx], album);
+          } else {
+            await playNext(album);
+          }
+        }
       }
     }
   }, 1000);
@@ -239,6 +273,7 @@ export async function playShuffledAll(albums: Album[]) {
     stopShuffle();
     return;
   }
+  if (get(repeatMode) === 'one') repeatMode.set('none');
   const all: QueueItem[] = albums.flatMap(a => a.tracks.map(t => ({ track: t, album: a })));
   const current = get(currentTrack);
   const currentAlbumVal = get(currentAlbum);
@@ -264,6 +299,7 @@ export async function playShuffled(album: Album) {
     stopShuffle();
     return;
   }
+  if (get(repeatMode) === 'one') repeatMode.set('none');
   const current = get(currentTrack);
   if (current && (get(isPlaying) || get(isPaused))) {
     const rest = album.tracks.filter(t => t.id !== current.id).map(t => ({ track: t, album }));
@@ -289,6 +325,7 @@ export async function playPlaylist(items: QueueItem[], startIdx = 0, playlistId:
 
 export async function playShuffledPlaylist(items: QueueItem[], playlistId: string | null = null) {
   if (!items.length) return;
+  if (get(repeatMode) === 'one') repeatMode.set('none');
   const current = get(currentTrack);
   if (current && (get(isPlaying) || get(isPaused))) {
     const currentItem = items.find(i => i.track.id === current.id);

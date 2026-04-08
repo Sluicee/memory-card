@@ -11,6 +11,8 @@
     pause,
     resume,
     isShuffled,
+    repeatMode,
+    toggleRepeat,
   } from '../stores/player';
   import VolumeControl from './VolumeControl.svelte';
   import SpinningCover from './SpinningCover.svelte';
@@ -181,6 +183,10 @@
       <button class="hint-btn" onclick={handleShuffle}>
         <PS2Btn type="square" />
         <span class:active-shuffle={$isShuffled}>Shuffle</span>
+      </button>
+      <button class="hint-btn" onclick={() => { playUiSfx('confirm'); toggleRepeat(); }}>
+        <PS2Btn type="triangle" />
+        <span class:active-repeat={$repeatMode !== 'none'} style="display:inline-block;min-width:58px">{$repeatMode === 'one' ? 'Repeat 1' : $repeatMode === 'all' ? 'Repeat All' : 'Repeat'}</span>
       </button>
 
       <div class="hints-sep"></div>
@@ -400,6 +406,7 @@
   }
 
   .active-shuffle { color: var(--track-active); }
+  .active-repeat  { color: var(--track-active); }
 
   .hint-btn--shoulder {
     gap: 6px;

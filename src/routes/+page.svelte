@@ -31,6 +31,8 @@
     playPrev,
     playShuffledAll,
     isShuffled,
+    repeatMode,
+    toggleRepeat,
     initVolume,
     loadLastTrack,
   } from '$lib/stores/player';
@@ -229,7 +231,7 @@
         </div>
       {:else if $albums.length === 0}
         <div class="state-msg">
-          <p class="hint">Select <strong>Options</strong> to choose a music folder</p>
+          <p class="hint">Select <strong>⚙ Options</strong> to choose a music folder</p>
         </div>
       {:else}
         {#if $isScanning}
@@ -340,9 +342,12 @@
         <PS2Btn type="square" />
         <span class="btn-label" class:active-shuffle={$isShuffled}>Shuffle</span>
       </button>
-      <button class="action-hint action-btn" onclick={openOptions}>
+      <button class="action-hint action-btn" onclick={() => { playUiSfx('confirm'); toggleRepeat(); }}>
         <PS2Btn type="triangle" />
-        <span class="btn-label">Options</span>
+        <span class="btn-label repeat-label" class:active-repeat={$repeatMode !== 'none'}>{$repeatMode === 'one' ? 'Repeat 1' : $repeatMode === 'all' ? 'Repeat All' : 'Repeat'}</span>
+      </button>
+      <button class="action-hint action-btn options-btn" onclick={openOptions} title="Options">
+        <span class="gear-icon">⚙</span>
       </button>
     </div>
     </div><!-- /footer-bottom -->
@@ -791,7 +796,20 @@
   .actions {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 12px;
+  }
+
+  .gear-icon {
+    font-size: 16px;
+    color: var(--text-secondary);
+    line-height: 1;
+    opacity: 0.75;
+    transition: opacity 0.15s, color 0.15s;
+  }
+
+  .options-btn:hover .gear-icon {
+    opacity: 1;
+    color: var(--text-primary);
   }
 
   .action-hint {
@@ -808,6 +826,8 @@
 
   .active-shuffle { color: var(--track-active); }
   .active-search  { color: var(--track-active); }
+  .active-repeat  { color: var(--track-active); }
+  .repeat-label   { display: inline-block; min-width: 58px; text-align: start;}
 
   /* ── Search ── */
   .search-input {
