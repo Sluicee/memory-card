@@ -2,6 +2,7 @@
   import type { Album } from '../types';
   import AlbumCard from './AlbumCard.svelte';
   import { playUiSfx } from '$lib/ui-sfx';
+  import { tick } from 'svelte';
 
   const COLS = 4;
   const ROWS = 3;
@@ -11,39 +12,84 @@
     albums,
     onselect,
     onhover,
+    initialPage = 0,
   }: {
     albums: Album[];
     onselect: (album: Album) => void;
     onhover: (album: Album | null) => void;
+    initialPage?: number;
   } = $props();
 
-  let currentPage = $state(0);
+  // virtualIndex layout: [last-clone=0] [page0=1] [page1=2] ... [pageN=N] [first-clone=N+1]
+  let currentPage   = $state(0);   // logical page (0..totalPages-1)
+  let virtualIndex  = $state(1);   // DOM index in the slider
+  let noTransition  = $state(false);
   let scrollCooldown = false;
   let prevLength = 0;
+  let initialPageSet = false;
 
   let totalPages = $derived(Math.max(1, Math.ceil(albums.length / PER_PAGE)));
 
+  // Page slice helpers
+  function pageAlbums(pageIdx: number): Album[] {
+    return albums.slice(pageIdx * PER_PAGE, (pageIdx + 1) * PER_PAGE);
+  }
+
   $effect(() => {
-    // Reset page only when list is cleared (new scan started), not when albums are appended
-    if (albums.length === 0) {
+    const len = albums.length;
+    const tp = totalPages;
+
+    if (len === 0) {
       currentPage = 0;
-    } else if (albums.length < prevLength) {
-      currentPage = 0;
+      virtualIndex = 1;
+      initialPageSet = false;
+    } else if (len < prevLength) {
+      // Albums reduced (filter or clear) — clamp to valid page
+      const clamped = Math.min(currentPage, tp - 1);
+      currentPage = clamped;
+      virtualIndex = clamped + 1;
+    } else if (!initialPageSet) {
+      // First non-zero batch — apply initial page
+      const page = Math.min(initialPage, tp - 1);
+      currentPage = page;
+      virtualIndex = page + 1;
+      initialPageSet = true;
     }
-    prevLength = albums.length;
+    prevLength = len;
   });
 
+  async function snapTo(newVirtual: number, newPage: number) {
+    noTransition = true;
+    virtualIndex = newVirtual;
+    currentPage = newPage;
+    await tick();
+    // Brief delay so browser applies no-transition before we re-enable
+    setTimeout(() => { noTransition = false; }, 20);
+  }
+
   function nextPage() {
-    if (currentPage < totalPages - 1) {
-      playUiSfx('nextPrev');
-      currentPage++;
+    playUiSfx('nextPrev');
+    const next = virtualIndex + 1;
+    virtualIndex = next;
+    if (next > totalPages) {
+      // Landed on first-page clone — animate there, then snap to real first page
+      currentPage = 0;
+      setTimeout(() => snapTo(1, 0), 370);
+    } else {
+      currentPage = next - 1;
     }
   }
 
   function prevPage() {
-    if (currentPage > 0) {
-      playUiSfx('nextPrev');
-      currentPage--;
+    playUiSfx('nextPrev');
+    const prev = virtualIndex - 1;
+    virtualIndex = prev;
+    if (prev < 1) {
+      // Landed on last-page clone — animate there, then snap to real last page
+      currentPage = totalPages - 1;
+      setTimeout(() => snapTo(totalPages, totalPages - 1), 370);
+    } else {
+      currentPage = prev - 1;
     }
   }
 
@@ -63,17 +109,37 @@
   <div class="stage">
     <div
       class="slider"
-      style="transform: translateX({-currentPage * 100}%)"
+      class:no-transition={noTransition}
+      style="transform: translateX({-virtualIndex * 100}%)"
     >
+      <!-- Clone of last page (enables wrapping leftward) -->
+      <div class="page">
+        <div class="grid">
+          {#each pageAlbums(totalPages - 1) as album (album.id + '_lc')}
+            <AlbumCard {album} onclick={() => onselect(album)} onhover={(a) => onhover(a)} />
+          {/each}
+        </div>
+      </div>
+
+      <!-- Real pages -->
       {#each Array(totalPages) as _, pageIdx}
         <div class="page">
           <div class="grid">
-            {#each albums.slice(pageIdx * PER_PAGE, (pageIdx + 1) * PER_PAGE) as album (album.id)}
+            {#each pageAlbums(pageIdx) as album (album.id)}
               <AlbumCard {album} onclick={() => onselect(album)} onhover={(a) => onhover(a)} />
             {/each}
           </div>
         </div>
       {/each}
+
+      <!-- Clone of first page (enables wrapping rightward) -->
+      <div class="page">
+        <div class="grid">
+          {#each pageAlbums(0) as album (album.id + '_fc')}
+            <AlbumCard {album} onclick={() => onselect(album)} onhover={(a) => onhover(a)} />
+          {/each}
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -86,7 +152,6 @@
     overflow: hidden;
   }
 
-  /* 3D perspective stage */
   .stage {
     flex: 1;
     min-height: 0;
@@ -101,6 +166,10 @@
     height: 100%;
     display: flex;
     transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .slider.no-transition {
+    transition: none;
   }
 
   .page {

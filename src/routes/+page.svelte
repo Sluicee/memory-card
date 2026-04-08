@@ -46,6 +46,7 @@
   import type { Playlist } from '$lib/stores/playlists';
 
   let activeTab         = $state<'library' | 'playlists'>('library');
+  let initialAlbumPage  = $state(0);
   let hoveredAlbum      = $state<Album | null>(null);
   let hoveredPlaylist   = $state<Playlist | null>(null);
   let selectedPlaylist  = $state<Playlist | null>(null);
@@ -171,6 +172,10 @@
 
     // Load cached library (no rescan)
     await loadCache();
+
+    // Pick a random starting page now that the full library is loaded
+    const totalPages = Math.max(1, Math.ceil($albums.length / 12));
+    initialAlbumPage = Math.floor(Math.random() * totalPages);
 
     // Check for updates in background
     checkForUpdates();
@@ -313,7 +318,7 @@
         {#if searchOpen && searchQuery && filteredAlbums.length === 0}
           <div class="state-msg"><p class="hint">No results for <strong>{searchQuery}</strong></p></div>
         {:else}
-          <AlbumGrid albums={filteredAlbums} onselect={selectAlbum} onhover={(a) => (hoveredAlbum = a)} />
+          <AlbumGrid albums={filteredAlbums} onselect={selectAlbum} onhover={(a) => (hoveredAlbum = a)} initialPage={initialAlbumPage} />
         {/if}
       {/if}
     {:else}
