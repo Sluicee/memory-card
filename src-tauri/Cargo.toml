@@ -37,6 +37,7 @@ tokio = { version = "1", features = ["sync", "rt"] }
 souvlaki = "0.8"
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
 discord-rich-presence = "0.2.4"
 
 [target.'cfg(windows)'.dependencies.windows]

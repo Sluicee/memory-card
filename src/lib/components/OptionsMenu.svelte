@@ -3,10 +3,36 @@
   import { scanFolder, refreshLibrary, clearLibrary } from '../stores/library';
   import { updateInfo } from '../stores/updates';
   import { openUrl } from '@tauri-apps/plugin-opener';
+  import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
   import PS2Btn from './PS2Btn.svelte';
   import { playUiSfx } from '$lib/ui-sfx';
+  import { onMount } from 'svelte';
 
   let { onclose, onStats }: { onclose: () => void; onStats: () => void } = $props();
+  let autostartEnabled = $state(false);
+
+  onMount(async () => {
+    try {
+      autostartEnabled = await isEnabled();
+    } catch (e) {
+      console.error('Failed to check autostart status:', e);
+    }
+  });
+
+  async function toggleAutostart() {
+    playUiSfx('confirm');
+    try {
+      if (autostartEnabled) {
+        await disable();
+        autostartEnabled = false;
+      } else {
+        await enable();
+        autostartEnabled = true;
+      }
+    } catch (e) {
+      console.error('Failed to toggle autostart:', e);
+    }
+  }
 
   async function addFolder() {
     const path = await invoke<string | null>('pick_folder');
@@ -57,6 +83,7 @@
     { label: 'Add new folder',  action: addFolder  },
     { label: 'Refresh library', action: refresh    },
     { label: 'Statistics',      action: openStats  },
+    { label: `Launch at startup: ${autostartEnabled ? 'ON' : 'OFF'}`, action: toggleAutostart },
     { label: 'Clear library',   action: clear      },
   ]);
 </script>
