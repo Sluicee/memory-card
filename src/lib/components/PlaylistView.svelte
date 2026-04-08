@@ -1,47 +1,73 @@
 <script lang="ts">
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import type { Album, Track } from '../types';
+  import type { Track } from '../types';
+  import type { Playlist } from '../stores/playlists';
+  import { albums } from '../stores/library';
   import {
     currentTrack,
+    currentAlbum,
     isPlaying,
-    playTrack,
-    playShuffled,
+    playPlaylist,
+    playShuffledPlaylist,
     playNext,
     playPrev,
     pause,
     resume,
     isShuffled,
+    type QueueItem,
   } from '../stores/player';
-  import VolumeControl from './VolumeControl.svelte';
   import SpinningCover from './SpinningCover.svelte';
+  import VolumeControl from './VolumeControl.svelte';
   import PS2Btn from './PS2Btn.svelte';
-  import PlaylistPicker from './PlaylistPicker.svelte';
   import { playUiSfx } from '$lib/ui-sfx';
 
   let {
-    album,
+    playlist,
     onclose,
   }: {
-    album: Album;
+    playlist: Playlist;
     onclose: () => void;
   } = $props();
 
+  // Build QueueItem[] for playback
+  const queueItems = $derived(
+    playlist.tracks
+      .map((track) => {
+        const album = $albums.find(
+          (a) => a.title === track.album && (a.artist === track.album_artist || a.artist === track.artist)
+        );
+        return album ? ({ track, album } satisfies QueueItem) : null;
+      })
+      .filter((x): x is QueueItem => x !== null)
+  );
+
+  // Is any track from this playlist currently active?
+  const isActivePlaylist = $derived(playlist.tracks.some((t) => t.id === $currentTrack?.id));
+
+  // Cover: current album's cover if playing from this playlist, else first available
+  const activeCoverSrc = $derived((() => {
+    if (isActivePlaylist && $currentAlbum?.cover_art) {
+      return convertFileSrc($currentAlbum.cover_art);
+    }
+    for (const item of queueItems) {
+      if (item.album.cover_art) return convertFileSrc(item.album.cover_art);
+    }
+    return null;
+  })());
+
+  // Tint from cover
   let tintColor = $state('rgba(120, 120, 140, 0.28)');
 
-  const coverSrc = $derived(album.cover_art ? convertFileSrc(album.cover_art) : null);
-
   $effect(() => {
-    if (coverSrc) {
-      extractDominantColor(coverSrc).then((c) => (tintColor = c));
+    if (activeCoverSrc) {
+      extractDominantColor(activeCoverSrc).then((c) => (tintColor = c));
     } else {
       tintColor = 'rgba(120, 120, 140, 0.28)';
     }
   });
 
   async function extractDominantColor(src: string): Promise<string> {
-    const fallback = 'rgba(120, 120, 140, 0.28)';
     try {
-      // createImageBitmap with resize decodes off the main thread — no freeze
       const bitmap = await createImageBitmap(
         await fetch(src).then((r) => r.blob()),
         { resizeWidth: 8, resizeHeight: 8, resizeQuality: 'low' }
@@ -59,11 +85,9 @@
       }
       return `rgba(${Math.round(r / px)}, ${Math.round(g / px)}, ${Math.round(b / px)}, 0.5)`;
     } catch {
-      return fallback;
+      return 'rgba(120, 120, 140, 0.28)';
     }
   }
-
-  let isActiveAlbum = $derived($currentTrack && album.tracks.some(t => t.id === $currentTrack!.id));
 
   function formatDuration(secs: number): string {
     const m = Math.floor(secs / 60);
@@ -76,29 +100,36 @@
       if ($isPlaying) await pause(); else await resume();
     } else {
       playUiSfx('confirm');
-      await playTrack(track, album);
+      const idx = queueItems.findIndex((qi) => qi.track.id === track.id);
+      if (idx !== -1) await playPlaylist(queueItems, idx, playlist.id);
     }
   }
 
   async function handlePlayPause() {
-    if (!isActiveAlbum) await playTrack(album.tracks[0], album);
-    else if ($isPlaying) await pause();
-    else await resume();
-  }
-
-  async function handlePrev() {
-    playUiSfx('nextPrev');
-    await playPrev(album);
-  }
-
-  async function handleNext() {
-    playUiSfx('nextPrev');
-    await playNext(album);
+    if (isActivePlaylist) {
+      if ($isPlaying) await pause(); else await resume();
+    } else {
+      if (!queueItems.length) return;
+      playUiSfx('confirm');
+      await playPlaylist(queueItems, 0, playlist.id);
+    }
   }
 
   async function handleShuffle() {
     playUiSfx('confirm');
-    await playShuffled(album);
+    await playShuffledPlaylist(queueItems, playlist.id);
+  }
+
+  async function handlePrev() {
+    if (!$currentAlbum) return;
+    playUiSfx('nextPrev');
+    await playPrev($currentAlbum);
+  }
+
+  async function handleNext() {
+    if (!$currentAlbum) return;
+    playUiSfx('nextPrev');
+    await playNext($currentAlbum);
   }
 
   function handleClose() {
@@ -110,7 +141,7 @@
     if (e.target === e.currentTarget) handleClose();
   }
 
-  let pickerTrack = $state<Track | null>(null);
+  const isFavourites = $derived(playlist.id === 'favourites');
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -120,83 +151,81 @@
   onmousedown={handleOverlayMouseDown}
 >
   <div class="view">
-
-    <!-- Always-spinning cover -->
-    {#if coverSrc}
-      <SpinningCover src={coverSrc} alt={album.title} />
+    <!-- 3D spinning cover -->
+    {#if activeCoverSrc}
+      <SpinningCover
+        src={activeCoverSrc}
+        alt={playlist.name}
+        spin={isActivePlaylist && $isPlaying}
+      />
     {:else}
-      <div class="cover-placeholder">♪</div>
+      <div class="cover-placeholder">{isFavourites ? '★' : '♪'}</div>
     {/if}
 
-    <!-- Info + tracklist only -->
+    <!-- Info + tracklist -->
     <div class="panel">
-      <div class="album-meta">
-        <h2 class="album-title">{album.title}</h2>
-        <p class="album-artist">{album.artist}</p>
-        {#if album.year}<p class="album-year">{album.year}</p>{/if}
+      <div class="playlist-meta">
+        <h2 class="playlist-title">{playlist.name}</h2>
+        <p class="playlist-count">{playlist.tracks.length} tracks</p>
       </div>
 
-      <ul class="tracklist">
-        {#each album.tracks as track (track.id)}
-          {@const active = $currentTrack?.id === track.id}
-          <li class="track" class:active>
-            <button class="track-btn" onclick={() => handleTrackClick(track)}>
-              <span class="track-num">
-                {#if active && $isPlaying}
-                  <span class="playing-dot">▶</span>
-                {:else}
-                  {track.track_number || '—'}
-                {/if}
-              </span>
-              <span class="track-title">{track.title}</span>
-              <span class="track-dur">{formatDuration(track.duration)}</span>
-            </button>
-            <button
-              class="track-add-btn"
-              onclick={(e) => { e.stopPropagation(); pickerTrack = track; }}
-              title="Add to playlist"
-            >+</button>
-          </li>
-        {/each}
-      </ul>
+      {#if playlist.tracks.length === 0}
+        <p class="empty-hint">No tracks yet — add them with +</p>
+      {:else}
+        <ul class="tracklist">
+          {#each playlist.tracks as track (track.id)}
+            {@const active = $currentTrack?.id === track.id}
+            <li class="track" class:active>
+              <button class="track-btn" onclick={() => handleTrackClick(track)}>
+                <span class="track-num">
+                  {#if active && $isPlaying}
+                    <span class="playing-dot">▶</span>
+                  {:else}
+                    {track.track_number || '—'}
+                  {/if}
+                </span>
+                <span class="track-title">{track.title}</span>
+                <span class="track-artist">{track.artist}</span>
+                <span class="track-dur">{formatDuration(track.duration)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
-
   </div>
 
-  {#if pickerTrack}
-    <PlaylistPicker track={pickerTrack} onclose={() => pickerTrack = null} />
-  {/if}
-
-  <!-- Bottom: gamepad hints (functional) + volume -->
+  <!-- Bottom hints -->
   <div class="hints">
     <div class="hints-row">
       <button class="hint-btn" onclick={handleClose}>
         <PS2Btn type="circle" />
         <span>Back</span>
       </button>
-      <button class="hint-btn" onclick={handlePlayPause}>
-        <PS2Btn type="cross" />
-        <span class="play-pause-text">{isActiveAlbum && $isPlaying ? 'Pause' : 'Play'}</span>
-      </button>
-      <button class="hint-btn" onclick={handleShuffle}>
-        <PS2Btn type="square" />
-        <span class:active-shuffle={$isShuffled}>Shuffle</span>
-      </button>
+      {#if queueItems.length > 0}
+        <button class="hint-btn" onclick={handlePlayPause}>
+          <PS2Btn type="cross" />
+          <span class="play-pause-text">{isActivePlaylist && $isPlaying ? 'Pause' : 'Play'}</span>
+        </button>
+        <button class="hint-btn" onclick={handleShuffle}>
+          <PS2Btn type="square" />
+          <span class:active-shuffle={$isShuffled && isActivePlaylist}>Shuffle</span>
+        </button>
 
-      <div class="hints-sep"></div>
+        <div class="hints-sep"></div>
 
-      <button class="hint-btn hint-btn--shoulder" onclick={handlePrev} disabled={!$currentTrack}>
-        <span class="shoulder-tag">L1</span>
-        <span class="nav-icon">&lt;&lt;</span>
-        <span>Prev</span>
-      </button>
-      <button class="hint-btn hint-btn--shoulder" onclick={handleNext} disabled={!$currentTrack}>
-        <span class="shoulder-tag">R1</span>
-        <span class="nav-icon">&gt;&gt;</span>
-        <span>Next</span>
-      </button>
+        <button class="hint-btn hint-btn--shoulder" onclick={handlePrev} disabled={!$currentTrack}>
+          <span class="shoulder-tag">L1</span>
+          <span class="nav-icon">&lt;&lt;</span>
+          <span>Prev</span>
+        </button>
+        <button class="hint-btn hint-btn--shoulder" onclick={handleNext} disabled={!$currentTrack}>
+          <span class="shoulder-tag">R1</span>
+          <span class="nav-icon">&gt;&gt;</span>
+          <span>Next</span>
+        </button>
+      {/if}
     </div>
-
     <div class="hints-row hints-row--volume">
       <VolumeControl />
     </div>
@@ -233,7 +262,6 @@
     to   { opacity: 1; transform: perspective(900px) rotateY(0deg) scale(1); }
   }
 
-  /* ── Cover placeholder (no art) ── */
   .cover-placeholder {
     width: 260px;
     height: 260px;
@@ -246,7 +274,6 @@
     background: rgba(90, 95, 120, 0.18);
   }
 
-  /* ── Panel ── */
   .panel {
     display: flex;
     flex-direction: column;
@@ -254,19 +281,34 @@
     width: 280px;
   }
 
-  .album-meta { display: flex; flex-direction: column; gap: 3px; align-items: center; text-align: center; }
+  .playlist-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: center;
+    text-align: center;
+  }
 
-  .album-title {
+  .playlist-title {
     font-size: 19px;
     color: var(--track-active);
     line-height: 1.2;
     margin: 0;
   }
 
-  .album-artist { font-size: 13px; color: var(--text-secondary); margin: 0; }
-  .album-year   { font-size: 11px; color: var(--text-dim); margin: 0; }
+  .playlist-count {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin: 0;
+  }
 
-  /* ── Tracklist ── */
+  .empty-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 20px;
+  }
+
   .tracklist {
     list-style: none;
     display: flex;
@@ -278,15 +320,12 @@
   .tracklist::-webkit-scrollbar { width: 3px; }
   .tracklist::-webkit-scrollbar-thumb { background: var(--text-dim); }
 
-  .track {
-    display: flex;
-    align-items: center;
-  }
+  .track { display: flex; align-items: center; }
 
   .track-btn {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex: 1;
     min-width: 0;
     background: none;
@@ -300,8 +339,6 @@
   .track-btn:hover .track-title,
   .track-btn:hover .track-num,
   .track-btn:hover .track-dur { color: var(--track-hover); }
-
-  .track.active .track-btn { background: none; }
 
   .track-num {
     font-size: 10px;
@@ -324,33 +361,23 @@
     transition: color 0.12s;
   }
 
+  .track-artist {
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 70px;
+    flex-shrink: 0;
+    transition: color 0.12s;
+  }
+
   .track.active .track-title,
   .track.active .track-num,
   .track.active .track-dur { color: var(--track-active); }
 
   .track-dur { font-size: 10px; color: var(--text-dim); flex-shrink: 0; transition: color 0.12s; }
 
-  .track-add-btn {
-    flex-shrink: 0;
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 800;
-    color: var(--text-dim);
-    padding: 0 6px 0 2px;
-    line-height: 1;
-    opacity: 0;
-    transition: opacity 0.12s, color 0.12s;
-  }
-
-  .track:hover .track-add-btn {
-    opacity: 1;
-  }
-
-  .track-add-btn:hover { color: var(--track-hover); }
-
-  /* ── Bottom hints ── */
   .hints {
     display: flex;
     flex-direction: column;
@@ -363,19 +390,9 @@
     align-items: center;
     gap: 18px;
     justify-content: center;
-    flex-wrap: wrap;
   }
 
-  .hints-row--volume {
-    gap: 0;
-  }
-
-  .hints-sep {
-    width: 1px;
-    height: 20px;
-    background: var(--text-dim);
-    opacity: 0.3;
-  }
+  .hints-row--volume { gap: 0; }
 
   .hint-btn {
     display: flex;
@@ -390,8 +407,7 @@
     transition: color 0.15s;
   }
 
-  .hint-btn:hover:not(:disabled) { color: var(--text-primary); }
-  .hint-btn:disabled { opacity: 0.35; cursor: default; }
+  .hint-btn:hover { color: var(--text-primary); }
 
   .play-pause-text {
     display: inline-block;
@@ -400,6 +416,13 @@
   }
 
   .active-shuffle { color: var(--track-active); }
+
+  .hints-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--text-dim);
+    opacity: 0.3;
+  }
 
   .hint-btn--shoulder {
     gap: 6px;
@@ -413,21 +436,19 @@
       inset 0 -1px 2px rgba(0, 0, 0, 0.25);
   }
 
-  .shoulder-tag,
-  .nav-icon {
-    text-shadow: none;
-  }
+  .hint-btn:disabled { opacity: 0.35; cursor: default; }
 
   .shoulder-tag {
     font-size: 9px;
     letter-spacing: 0.08em;
     color: rgba(238, 242, 255, 0.82);
+    text-shadow: none;
   }
 
   .nav-icon {
     font-size: 11px;
     font-weight: 900;
     color: var(--track-hover);
+    text-shadow: none;
   }
-
 </style>

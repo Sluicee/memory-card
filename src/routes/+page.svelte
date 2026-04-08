@@ -2,11 +2,14 @@
   import { convertFileSrc } from '@tauri-apps/api/core';
   import AlbumGrid from '$lib/components/AlbumGrid.svelte';
   import AlbumView from '$lib/components/AlbumView.svelte';
+  import PlaylistGrid from '$lib/components/PlaylistGrid.svelte';
+  import PlaylistView from '$lib/components/PlaylistView.svelte';
   import VolumeControl from '$lib/components/VolumeControl.svelte';
   import ProgressBar from '$lib/components/ProgressBar.svelte';
   import PS2Btn from '$lib/components/PS2Btn.svelte';
   import OptionsMenu from '$lib/components/OptionsMenu.svelte';
   import StatsView from '$lib/components/StatsView.svelte';
+  import PlaylistPicker from '$lib/components/PlaylistPicker.svelte';
   import { playUiSfx, primeUiSfx } from '$lib/ui-sfx';
   import { onMount } from 'svelte';
   import {
@@ -33,11 +36,18 @@
   } from '$lib/stores/player';
   import { checkForUpdates } from '$lib/stores/updates';
   import { currentTrack as ct, currentAlbum as ca, duration } from '$lib/stores/player';
+  import { playlists } from '$lib/stores/playlists';
+  import { currentPlaylistId } from '$lib/stores/player';
   import type { Album } from '$lib/types';
+  import type { Playlist } from '$lib/stores/playlists';
 
+  let activeTab         = $state<'library' | 'playlists'>('library');
   let hoveredAlbum      = $state<Album | null>(null);
+  let hoveredPlaylist   = $state<Playlist | null>(null);
+  let selectedPlaylist  = $state<Playlist | null>(null);
   let optionsOpen       = $state(false);
   let statsOpen         = $state(false);
+  let npPickerOpen      = $state(false);
   let searchOpen        = $state(false);
   let searchQuery       = $state('');
   let searchInput       = $state<HTMLInputElement | null>(null);
@@ -129,8 +139,15 @@
     optionsOpen = true;
   }
 
-  function openCurrentAlbum() {
-    if ($currentAlbum) {
+  function openCurrentContext() {
+    if ($currentPlaylistId) {
+      const pl = $playlists.find((p) => p.id === $currentPlaylistId);
+      if (pl) {
+        playUiSfx('confirm');
+        activeTab = 'playlists';
+        selectedPlaylist = pl;
+      }
+    } else if ($currentAlbum) {
       playUiSfx('confirm');
       followPlayback = true;
       selectedAlbum.set($currentAlbum);
@@ -160,7 +177,7 @@
     </div>
 
     <div class="header-right">
-      {#if searchOpen}
+      {#if searchOpen && activeTab === 'library'}
         <input
           bind:this={searchInput}
           bind:value={searchQuery}
@@ -173,41 +190,66 @@
       {:else if $isScanning}
         <span class="scanning">Scanning…</span>
       {/if}
-      {#if hoveredAlbum}
+      {#if activeTab === 'library' && hoveredAlbum}
         <span class="hovered-title" class:hovered-title--small={searchOpen}>{hoveredAlbum.title}</span>
+      {:else if activeTab === 'playlists' && hoveredPlaylist}
+        <span class="hovered-title">{hoveredPlaylist.name}</span>
       {/if}
     </div>
   </header>
 
-  <!-- Album grid -->
+  <!-- Tab switcher -->
+  <div class="tab-toggle">
+    <div class="tab-thumb" class:tab-thumb--right={activeTab === 'playlists'}></div>
+    <button
+      class="tab-opt"
+      class:tab-opt--active={activeTab === 'library'}
+      onclick={() => { activeTab = 'library'; playUiSfx('back'); }}
+    >Library</button>
+    <button
+      class="tab-opt"
+      class:tab-opt--active={activeTab === 'playlists'}
+      onclick={() => { activeTab = 'playlists'; playUiSfx('confirm'); }}
+    >Playlists</button>
+  </div>
+
+  <!-- Content -->
   <main class="content">
-    {#if $isScanning && $albums.length === 0}
-      <div class="state-msg">
-        <div class="spinner"></div>
-        <p class="scan-info">
-          {#if $scanStatus.filesScanned > 0}
-            {$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
-          {:else}
-            Starting scan…
-          {/if}
-        </p>
-      </div>
-    {:else if $albums.length === 0}
-      <div class="state-msg">
-        <p class="hint">Select <strong>Options</strong> to choose a music folder</p>
-      </div>
-    {:else}
-      {#if $isScanning}
-        <div class="scan-bar">
-          <div class="spinner-sm"></div>
-          <span>{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums found</span>
+    {#if activeTab === 'library'}
+      {#if $isScanning && $albums.length === 0}
+        <div class="state-msg">
+          <div class="spinner"></div>
+          <p class="scan-info">
+            {#if $scanStatus.filesScanned > 0}
+              {$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
+            {:else}
+              Starting scan…
+            {/if}
+          </p>
         </div>
-      {/if}
-      {#if searchOpen && searchQuery && filteredAlbums.length === 0}
-        <div class="state-msg"><p class="hint">No results for <strong>{searchQuery}</strong></p></div>
+      {:else if $albums.length === 0}
+        <div class="state-msg">
+          <p class="hint">Select <strong>Options</strong> to choose a music folder</p>
+        </div>
       {:else}
-        <AlbumGrid albums={filteredAlbums} onselect={selectAlbum} onhover={(a) => (hoveredAlbum = a)} />
+        {#if $isScanning}
+          <div class="scan-bar">
+            <div class="spinner-sm"></div>
+            <span>{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums found</span>
+          </div>
+        {/if}
+        {#if searchOpen && searchQuery && filteredAlbums.length === 0}
+          <div class="state-msg"><p class="hint">No results for <strong>{searchQuery}</strong></p></div>
+        {:else}
+          <AlbumGrid albums={filteredAlbums} onselect={selectAlbum} onhover={(a) => (hoveredAlbum = a)} />
+        {/if}
       {/if}
+    {:else}
+      <PlaylistGrid
+        playlists={$playlists}
+        onselect={(pl) => { playUiSfx('confirm'); selectedPlaylist = pl; }}
+        onhover={(pl) => (hoveredPlaylist = pl)}
+      />
     {/if}
   </main>
 
@@ -257,24 +299,32 @@
     <!-- Row 3: now-playing | volume | hints -->
     <div class="footer-bottom">
       <!-- Now playing -->
-      <button
-        class="now-playing"
-        class:active={!!$currentTrack}
-        onclick={openCurrentAlbum}
-        disabled={!$currentTrack}
-      >
-        <div class="now-playing-art">
-          {#if $currentAlbum?.cover_art}
-            <img src={convertFileSrc($currentAlbum.cover_art)} alt="" />
-          {:else}
-            <span>♪</span>
-          {/if}
-        </div>
-        <div class="now-playing-info">
-          <span class="track-name">{$currentTrack?.title ?? 'No track playing'}</span>
-          <span class="track-artist">{$currentTrack?.artist ?? '—'}</span>
-        </div>
-      </button>
+      <div class="now-playing" class:active={!!$currentTrack}>
+        <button
+          class="now-playing-main"
+          onclick={openCurrentContext}
+          disabled={!$currentTrack}
+        >
+          <div class="now-playing-art">
+            {#if $currentAlbum?.cover_art}
+              <img src={convertFileSrc($currentAlbum.cover_art)} alt="" />
+            {:else}
+              <span>♪</span>
+            {/if}
+          </div>
+          <div class="now-playing-info">
+            <span class="track-name">{$currentTrack?.title ?? 'No track playing'}</span>
+            <span class="track-artist">{$currentTrack?.artist ?? '—'}</span>
+          </div>
+        </button>
+        {#if $currentTrack}
+          <button
+            class="np-add-btn"
+            onclick={() => { playUiSfx('open'); npPickerOpen = true; }}
+            title="Add to playlist"
+          >+</button>
+        {/if}
+      </div>
 
     <!-- PS2 action hints -->
       <div class="actions">
@@ -304,6 +354,14 @@
   <AlbumView album={$selectedAlbum} onclose={() => { selectedAlbum.set(null); followPlayback = false; }} />
 {/if}
 
+{#if selectedPlaylist}
+  <PlaylistView playlist={selectedPlaylist} onclose={() => selectedPlaylist = null} />
+{/if}
+
+{#if npPickerOpen && $currentTrack}
+  <PlaylistPicker track={$currentTrack} onclose={() => npPickerOpen = false} />
+{/if}
+
 {#if optionsOpen}
   <OptionsMenu onclose={() => optionsOpen = false} onStats={() => statsOpen = true} />
 {/if}
@@ -330,7 +388,7 @@
     width: 100%;
     height: 100%;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto;
     padding: 12px 16px 10px;
   }
 
@@ -424,6 +482,62 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
+  /* ── Tab toggle ── */
+  .tab-toggle {
+    position: relative;
+    display: inline-flex;
+    justify-self: start;
+    background: linear-gradient(180deg, rgb(22, 23, 32), rgb(28, 30, 42));
+    border: 1px solid rgba(212, 219, 240, 0.08);
+    border-radius: 5px;
+    padding: 2px;
+    box-shadow:
+      inset 0 2px 4px rgba(0,0,0,0.5),
+      inset 0 1px 0 rgba(0,0,0,0.3);
+  }
+
+  .tab-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    height: calc(100% - 4px);
+    width: calc(50% - 2px);
+    background: linear-gradient(180deg, rgb(54, 56, 70), rgb(60, 64, 80));
+    border-radius: 3px;
+    border: 1px solid rgba(212, 219, 240, 0.1);
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.35),
+      inset 0 1px 0 rgba(255,255,255,0.07);
+    transition: transform 0.18s cubic-bezier(0.34, 1.2, 0.64, 1);
+    pointer-events: none;
+  }
+
+  .tab-thumb--right {
+    transform: translateX(100%);
+  }
+
+  .tab-opt {
+    position: relative;
+    z-index: 1;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 10px;
+    font-family: inherit;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 3px 10px;
+    border-radius: 3px;
+    transition: color 0.15s;
+    text-shadow: var(--text-shadow);
+    white-space: nowrap;
+  }
+
+  .tab-opt:hover { color: var(--text-secondary); }
+  .tab-opt--active { color: var(--text-primary); }
+
   /* ── Content ── */
   .content {
     overflow: hidden;
@@ -513,23 +627,52 @@
   .now-playing {
     display: flex;
     align-items: center;
-    gap: 7px;
     background: linear-gradient(180deg, rgb(48, 48, 48), rgb(54, 58, 68));
-    border: none;
     border-radius: 8px;
-    padding: 6px 10px 6px 6px;
-    cursor: pointer;
     box-shadow: var(--btn-shadow);
     backdrop-filter: blur(12px);
-    transition: box-shadow 0.2s, transform 0.15s, opacity 0.2s;
-    max-width: 180px;
+    max-width: 210px;
+    overflow: hidden;
+    transition: box-shadow 0.2s, transform 0.15s;
   }
 
-  .now-playing:disabled { opacity: 0.45; cursor: default; }
-  .now-playing:not(:disabled):hover {
+  .now-playing.active:hover {
     box-shadow: var(--card-shadow-hover);
     transform: translateY(-1px);
   }
+
+  .now-playing-main {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 6px 6px 6px;
+    transition: opacity 0.2s;
+  }
+
+  .now-playing-main:disabled { opacity: 0.45; cursor: default; }
+
+  .np-add-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--text-dim);
+    padding: 0 9px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    transition: color 0.12s, background 0.12s;
+  }
+
+  .np-add-btn:hover { color: var(--track-hover); background: rgba(255,255,255,0.05); }
 
   .now-playing-art {
     width: 26px;

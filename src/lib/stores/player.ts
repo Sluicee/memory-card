@@ -35,18 +35,19 @@ export function loadLastTrack(): { track: Track; album: Album } | null {
 
 // ── Stores ────────────────────────────────────────────────────────────────────
 
-export const currentTrack = writable<Track | null>(null);
-export const currentAlbum = writable<Album | null>(null);
-export const isPlaying    = writable(false);
-export const isPaused     = writable(false);
-export const volume       = writable(loadVolume());
-export const position     = writable(0);
-export const duration     = writable(0);
-export const isShuffled   = writable(false);
+export const currentTrack      = writable<Track | null>(null);
+export const currentAlbum      = writable<Album | null>(null);
+export const currentPlaylistId = writable<string | null>(null);
+export const isPlaying         = writable(false);
+export const isPaused          = writable(false);
+export const volume            = writable(loadVolume());
+export const position          = writable(0);
+export const duration          = writable(0);
+export const isShuffled        = writable(false);
 
 // ── Shuffle queue (module-level, not reactive) ────────────────────────────────
 
-type QueueItem = { track: Track; album: Album };
+export type QueueItem = { track: Track; album: Album };
 let _queue: QueueItem[] = [];
 let _qIdx = -1;
 
@@ -77,7 +78,15 @@ function startPolling() {
           _qIdx = next;
           await playTrack(_queue[_qIdx].track, _queue[_qIdx].album, true);
         } else {
-          stopShuffle();
+          // Queue exhausted — stop cleanly, keep track info for display
+          _queue = [];
+          _qIdx = -1;
+          isShuffled.set(false);
+          currentPlaylistId.set(null);
+          await invoke('audio_stop');
+          isPlaying.set(false);
+          isPaused.set(false);
+          stopPolling();
         }
       } else {
         const album = get(currentAlbum);
@@ -97,12 +106,13 @@ export function stopShuffle() {
   _queue = [];
   _qIdx = -1;
   isShuffled.set(false);
+  currentPlaylistId.set(null);
 }
 
 export async function playTrack(track: Track, album: Album, fromShuffle = false) {
   try {
     if (!fromShuffle) {
-      stopShuffle();
+      stopShuffle(); // also clears currentPlaylistId
     }
 
     // Record listened time for the outgoing track before switching
@@ -152,6 +162,7 @@ export async function stop() {
   isPlaying.set(false);
   isPaused.set(false);
   currentTrack.set(null);
+  currentPlaylistId.set(null);
   position.set(0);
   saveLastTrack(null, null);
   _queue = []; _qIdx = -1; isShuffled.set(false);
@@ -250,6 +261,24 @@ export async function playShuffled(album: Album) {
   _qIdx = 0;
   isShuffled.set(true);
   if (_queue[0]) await playTrack(_queue[0].track, _queue[0].album, true);
+}
+
+export async function playPlaylist(items: QueueItem[], startIdx = 0, playlistId: string | null = null) {
+  if (!items.length) return;
+  _queue = [...items];
+  _qIdx = Math.max(0, Math.min(startIdx, items.length - 1));
+  isShuffled.set(false);
+  currentPlaylistId.set(playlistId);
+  await playTrack(_queue[_qIdx].track, _queue[_qIdx].album, true);
+}
+
+export async function playShuffledPlaylist(items: QueueItem[], playlistId: string | null = null) {
+  if (!items.length) return;
+  _queue = fisherYates([...items]);
+  _qIdx = 0;
+  isShuffled.set(true);
+  currentPlaylistId.set(playlistId);
+  await playTrack(_queue[0].track, _queue[0].album, true);
 }
 
 export async function initVolume() {
