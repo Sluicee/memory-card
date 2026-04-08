@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { convertFileSrc } from '@tauri-apps/api/core';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
-  import AlbumGrid from '$lib/components/AlbumGrid.svelte';
-  import AlbumView from '$lib/components/AlbumView.svelte';
-  import PlaylistGrid from '$lib/components/PlaylistGrid.svelte';
-  import PlaylistView from '$lib/components/PlaylistView.svelte';
-  import VolumeControl from '$lib/components/VolumeControl.svelte';
-  import ProgressBar from '$lib/components/ProgressBar.svelte';
-  import PS2Btn from '$lib/components/PS2Btn.svelte';
-  import OptionsMenu from '$lib/components/OptionsMenu.svelte';
-  import StatsView from '$lib/components/StatsView.svelte';
-  import PlaylistPicker from '$lib/components/PlaylistPicker.svelte';
-  import { playUiSfx, primeUiSfx } from '$lib/ui-sfx';
-  import { onMount } from 'svelte';
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import AlbumGrid from "$lib/components/AlbumGrid.svelte";
+  import AlbumView from "$lib/components/AlbumView.svelte";
+  import PlaylistGrid from "$lib/components/PlaylistGrid.svelte";
+  import PlaylistView from "$lib/components/PlaylistView.svelte";
+  import VolumeControl from "$lib/components/VolumeControl.svelte";
+  import ProgressBar from "$lib/components/ProgressBar.svelte";
+  import PS2Btn from "$lib/components/PS2Btn.svelte";
+  import OptionsMenu from "$lib/components/OptionsMenu.svelte";
+  import StatsView from "$lib/components/StatsView.svelte";
+  import PlaylistPicker from "$lib/components/PlaylistPicker.svelte";
+  import { playUiSfx, primeUiSfx } from "$lib/ui-sfx";
+  import { onMount } from "svelte";
   import {
     albums,
     isScanning,
@@ -20,7 +20,7 @@
     selectedAlbum,
     scanStatus,
     loadCache,
-  } from '$lib/stores/library';
+  } from "$lib/stores/library";
   import {
     currentTrack,
     currentAlbum,
@@ -38,58 +38,65 @@
     loadLastTrack,
     volume,
     setVolume,
-  } from '$lib/stores/player';
-  import { checkForUpdates } from '$lib/stores/updates';
-  import { currentTrack as ct, currentAlbum as ca, duration } from '$lib/stores/player';
-  import { playlists } from '$lib/stores/playlists';
-  import { currentPlaylistId } from '$lib/stores/player';
-  import type { Album } from '$lib/types';
-  import type { Playlist } from '$lib/stores/playlists';
+  } from "$lib/stores/player";
+  import { checkForUpdates } from "$lib/stores/updates";
+  import {
+    currentTrack as ct,
+    currentAlbum as ca,
+    duration,
+  } from "$lib/stores/player";
+  import { playlists } from "$lib/stores/playlists";
+  import { currentPlaylistId } from "$lib/stores/player";
+  import type { Album } from "$lib/types";
+  import type { Playlist } from "$lib/stores/playlists";
 
-  let activeTab         = $state<'library' | 'playlists'>('library');
-  let initialAlbumPage  = $state(0);
-  let hoveredAlbum      = $state<Album | null>(null);
-  let hoveredPlaylist   = $state<Playlist | null>(null);
-  let selectedPlaylist  = $state<Playlist | null>(null);
-  let optionsOpen       = $state(false);
-  let statsOpen         = $state(false);
-  let npPickerOpen      = $state(false);
-  let searchOpen        = $state(false);
-  let searchQuery       = $state('');
-  let searchInput       = $state<HTMLInputElement | null>(null);
-  let followPlayback    = $state(false);
+  let activeTab = $state<"library" | "playlists">("library");
+  let initialAlbumPage = $state(0);
+  let hoveredAlbum = $state<Album | null>(null);
+  let hoveredPlaylist = $state<Playlist | null>(null);
+  let selectedPlaylist = $state<Playlist | null>(null);
+  let optionsOpen = $state(false);
+  let statsOpen = $state(false);
+  let npPickerOpen = $state(false);
+  let searchOpen = $state(false);
+  let searchQuery = $state("");
+  let searchInput = $state<HTMLInputElement | null>(null);
+  let followPlayback = $state(false);
 
   const filteredAlbums = $derived(
     searchOpen && searchQuery.trim()
       ? (() => {
           const q = searchQuery.trim().toLowerCase();
-          return $albums.filter(a =>
-            a.title.toLowerCase().includes(q) ||
-            a.artist.toLowerCase().includes(q) ||
-            a.search_index?.toLowerCase().includes(q) ||
-            a.tracks.some(t =>
-              t.title.toLowerCase().includes(q) ||
-              t.artist.toLowerCase().includes(q) ||
-              t.search_index?.toLowerCase().includes(q)
-            )
+          return $albums.filter(
+            (a) =>
+              a.title.toLowerCase().includes(q) ||
+              a.artist.toLowerCase().includes(q) ||
+              a.search_index?.toLowerCase().includes(q) ||
+              a.tracks.some(
+                (t) =>
+                  t.title.toLowerCase().includes(q) ||
+                  t.artist.toLowerCase().includes(q) ||
+                  t.search_index?.toLowerCase().includes(q),
+              ),
           );
         })()
-      : $albums
+      : $albums,
   );
 
   function toggleSearch() {
     const opening = !searchOpen;
     searchOpen = opening;
-    playUiSfx(opening ? 'open' : 'back');
-    if (!searchOpen) { searchQuery = ''; }
-    else setTimeout(() => searchInput?.focus(), 30);
+    playUiSfx(opening ? "open" : "back");
+    if (!searchOpen) {
+      searchQuery = "";
+    } else setTimeout(() => searchInput?.focus(), 30);
   }
 
   function onSearchKey(e: KeyboardEvent) {
-    if (e.key === 'Escape' && searchOpen) {
-      playUiSfx('back');
+    if (e.key === "Escape" && searchOpen) {
+      playUiSfx("back");
       searchOpen = false;
-      searchQuery = '';
+      searchQuery = "";
     }
   }
 
@@ -97,64 +104,78 @@
 
   function handleGlobalKeydown(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
 
     const VOL_STEP = 1 / 20;
 
     switch (e.code) {
-      case 'Space':
+      case "Space":
         e.preventDefault();
         if ($currentTrack) handleTransportPlayPause();
         break;
-      case 'ArrowLeft':
+      case "ArrowLeft":
         e.preventDefault();
         if ($currentAlbum) handlePrev();
         break;
-      case 'ArrowRight':
+      case "ArrowRight":
         e.preventDefault();
         if ($currentAlbum) handleNext();
         break;
-      case 'ArrowUp':
+      case "ArrowUp":
         e.preventDefault();
-        playUiSfx('steps');
+        playUiSfx("steps");
         setVolume(Math.min(1, $volume + VOL_STEP));
         break;
-      case 'ArrowDown':
+      case "ArrowDown":
         e.preventDefault();
-        playUiSfx('steps');
+        playUiSfx("steps");
         setVolume(Math.max(0, $volume - VOL_STEP));
         break;
-      case 'KeyS':
+      case "KeyS":
         handleShuffleAll();
         break;
-      case 'KeyR':
-        playUiSfx('confirm');
+      case "KeyR":
+        playUiSfx("confirm");
         toggleRepeat();
         break;
-      case 'KeyF':
-      case 'Slash':
+      case "KeyF":
+      case "Slash":
         toggleSearch();
         break;
-      case 'KeyM':
-        if ($volume > 0) { mutedVolume = $volume; setVolume(0); }
-        else { setVolume(mutedVolume || 1); }
-        playUiSfx('steps');
+      case "KeyM":
+        if ($volume > 0) {
+          mutedVolume = $volume;
+          setVolume(0);
+        } else {
+          setVolume(mutedVolume || 1);
+        }
+        playUiSfx("steps");
         break;
-      case 'Escape':
-        if (optionsOpen)          { optionsOpen = false; }
-        else if (statsOpen)       { statsOpen = false; }
-        else if (npPickerOpen)    { npPickerOpen = false; }
-        else if (selectedPlaylist){ selectedPlaylist = null; }
-        else if ($selectedAlbum)  { selectedAlbum.set(null); followPlayback = false; }
-        else if (searchOpen)      { playUiSfx('back'); searchOpen = false; searchQuery = ''; }
+      case "Escape":
+        if (optionsOpen) {
+          optionsOpen = false;
+        } else if (statsOpen) {
+          statsOpen = false;
+        } else if (npPickerOpen) {
+          npPickerOpen = false;
+        } else if (selectedPlaylist) {
+          selectedPlaylist = null;
+        } else if ($selectedAlbum) {
+          selectedAlbum.set(null);
+          followPlayback = false;
+        } else if (searchOpen) {
+          playUiSfx("back");
+          searchOpen = false;
+          searchQuery = "";
+        }
         break;
-      case 'Digit1':
-        activeTab = 'library';
-        playUiSfx('back');
+      case "Digit1":
+        activeTab = "library";
+        playUiSfx("back");
         break;
-      case 'Digit2':
-        activeTab = 'playlists';
-        playUiSfx('confirm');
+      case "Digit2":
+        activeTab = "playlists";
+        playUiSfx("confirm");
         break;
     }
   }
@@ -190,7 +211,7 @@
   });
 
   function selectAlbum(album: Album) {
-    playUiSfx('confirm');
+    playUiSfx("confirm");
     followPlayback = false;
     selectedAlbum.set(album);
   }
@@ -202,23 +223,23 @@
 
   async function handlePrev() {
     if (!$currentAlbum) return;
-    playUiSfx('nextPrev');
+    playUiSfx("nextPrev");
     await playPrev($currentAlbum);
   }
 
   async function handleNext() {
     if (!$currentAlbum) return;
-    playUiSfx('nextPrev');
+    playUiSfx("nextPrev");
     await playNext($currentAlbum);
   }
 
   async function handleShuffleAll() {
-    playUiSfx('confirm');
+    playUiSfx("confirm");
     await playShuffledAll($albums);
   }
 
   function openOptions() {
-    playUiSfx('open');
+    playUiSfx("open");
     optionsOpen = true;
   }
 
@@ -226,19 +247,24 @@
     if ($currentPlaylistId) {
       const pl = $playlists.find((p) => p.id === $currentPlaylistId);
       if (pl) {
-        playUiSfx('confirm');
-        activeTab = 'playlists';
+        playUiSfx("confirm");
+        activeTab = "playlists";
         selectedPlaylist = pl;
       }
     } else if ($currentAlbum) {
-      playUiSfx('confirm');
+      playUiSfx("confirm");
       followPlayback = true;
       selectedAlbum.set($currentAlbum);
     }
   }
 
   $effect(() => {
-    if (followPlayback && $selectedAlbum && $currentAlbum && $selectedAlbum !== $currentAlbum) {
+    if (
+      followPlayback &&
+      $selectedAlbum &&
+      $currentAlbum &&
+      $selectedAlbum !== $currentAlbum
+    ) {
       selectedAlbum.set($currentAlbum);
     }
   });
@@ -247,218 +273,288 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="root">
-<div class="shell">
+  <div class="shell">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="mc-card"></div>
+        <div class="memory-block">
+          <span class="memory-label">Memory Card</span>
+          {#if $librarySize !== "0 MB"}
+            <span class="lib-size">{$librarySize}</span>
+          {/if}
+        </div>
+      </div>
 
-  <!-- Header -->
-  <header class="header">
-    <div class="header-left">
-      <div class="mc-card"></div>
-      <div class="memory-block">
-        <span class="memory-label">Memory Card</span>
-        {#if $librarySize !== '0 MB'}
-          <span class="lib-size">{$librarySize}</span>
+      <div class="header-right">
+        {#if searchOpen && activeTab === "library"}
+          <input
+            bind:this={searchInput}
+            bind:value={searchQuery}
+            onkeydown={onSearchKey}
+            class="search-input"
+            placeholder="Search…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        {:else if $isScanning}
+          <span class="scanning">Scanning…</span>
+        {/if}
+        {#if activeTab === "library" && hoveredAlbum}
+          <span class="hovered-title" class:hovered-title--small={searchOpen}
+            >{hoveredAlbum.title}</span
+          >
+        {:else if activeTab === "playlists" && hoveredPlaylist}
+          <span class="hovered-title">{hoveredPlaylist.name}</span>
         {/if}
       </div>
+    </header>
+
+    <!-- Tab switcher -->
+    <div class="tab-toggle">
+      <div
+        class="tab-thumb"
+        class:tab-thumb--right={activeTab === "playlists"}
+      ></div>
+      <button
+        class="tab-opt"
+        class:tab-opt--active={activeTab === "library"}
+        onclick={() => {
+          activeTab = "library";
+          playUiSfx("back");
+        }}>Library</button
+      >
+      <button
+        class="tab-opt"
+        class:tab-opt--active={activeTab === "playlists"}
+        onclick={() => {
+          activeTab = "playlists";
+          playUiSfx("confirm");
+        }}>Playlists</button
+      >
     </div>
 
-    <div class="header-right">
-      {#if searchOpen && activeTab === 'library'}
-        <input
-          bind:this={searchInput}
-          bind:value={searchQuery}
-          onkeydown={onSearchKey}
-          class="search-input"
-          placeholder="Search…"
-          autocomplete="off"
-          spellcheck="false"
+    <!-- Content -->
+    <main class="content">
+      {#if activeTab === "library"}
+        {#if $isScanning && $albums.length === 0}
+          <div class="state-msg">
+            <div class="spinner"></div>
+            <p class="scan-info">
+              {#if $scanStatus.filesScanned > 0}
+                {$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
+              {:else}
+                Starting scan…
+              {/if}
+            </p>
+          </div>
+        {:else if $albums.length === 0}
+          <div class="state-msg">
+            <p class="hint">
+              Select <strong>⚙ Options</strong> to choose a music folder
+            </p>
+          </div>
+        {:else}
+          {#if $isScanning}
+            <div class="scan-bar">
+              <div class="spinner-sm"></div>
+              <span
+                >{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
+                found</span
+              >
+            </div>
+          {/if}
+          {#if searchOpen && searchQuery && filteredAlbums.length === 0}
+            <div class="state-msg">
+              <p class="hint">No results for <strong>{searchQuery}</strong></p>
+            </div>
+          {:else}
+            <AlbumGrid
+              albums={filteredAlbums}
+              onselect={selectAlbum}
+              onhover={(a) => (hoveredAlbum = a)}
+              initialPage={initialAlbumPage}
+            />
+          {/if}
+        {/if}
+      {:else}
+        <PlaylistGrid
+          playlists={$playlists}
+          onselect={(pl) => {
+            playUiSfx("confirm");
+            selectedPlaylist = pl;
+          }}
+          onhover={(pl) => (hoveredPlaylist = pl)}
         />
-      {:else if $isScanning}
-        <span class="scanning">Scanning…</span>
       {/if}
-      {#if activeTab === 'library' && hoveredAlbum}
-        <span class="hovered-title" class:hovered-title--small={searchOpen}>{hoveredAlbum.title}</span>
-      {:else if activeTab === 'playlists' && hoveredPlaylist}
-        <span class="hovered-title">{hoveredPlaylist.name}</span>
-      {/if}
-    </div>
-  </header>
+    </main>
 
-  <!-- Tab switcher -->
-  <div class="tab-toggle">
-    <div class="tab-thumb" class:tab-thumb--right={activeTab === 'playlists'}></div>
-    <button
-      class="tab-opt"
-      class:tab-opt--active={activeTab === 'library'}
-      onclick={() => { activeTab = 'library'; playUiSfx('back'); }}
-    >Library</button>
-    <button
-      class="tab-opt"
-      class:tab-opt--active={activeTab === 'playlists'}
-      onclick={() => { activeTab = 'playlists'; playUiSfx('confirm'); }}
-    >Playlists</button>
+    <!-- Footer -->
+    <footer class="footer">
+      <!-- Row 1: progress -->
+      <div class="footer-progress">
+        <ProgressBar />
+      </div>
+
+      <!-- Row 2: transport + volume -->
+      <div class="footer-top">
+        <div class="transport">
+          <button
+            class="transport-btn transport-btn--shoulder"
+            onclick={handlePrev}
+            disabled={!$currentTrack}
+            title="Previous"
+          >
+            <span class="transport-tag">L1</span>
+            <span class="transport-icon">&lt;&lt;</span>
+            <span class="transport-text">Prev</span>
+          </button>
+          <button
+            class="transport-btn play-btn"
+            onclick={handleTransportPlayPause}
+            disabled={!$currentTrack}
+            title={$isPlaying ? "Pause" : "Play"}
+          >
+            <PS2Btn type="start" />
+            <span class="transport-text play-pause-text"
+              >{$isPlaying ? "Pause" : "Play"}</span
+            >
+          </button>
+          <button
+            class="transport-btn transport-btn--shoulder"
+            onclick={handleNext}
+            disabled={!$currentTrack}
+            title="Next"
+          >
+            <span class="transport-tag">R1</span>
+            <span class="transport-icon">&gt;&gt;</span>
+            <span class="transport-text">Next</span>
+          </button>
+        </div>
+        <VolumeControl />
+      </div>
+
+      <!-- Row 3: now-playing | volume | hints -->
+      <div class="footer-bottom">
+        <!-- Now playing -->
+        <div class="now-playing" class:active={!!$currentTrack}>
+          <button
+            class="now-playing-main"
+            onclick={openCurrentContext}
+            disabled={!$currentTrack}
+          >
+            <div class="now-playing-art">
+              {#if $currentAlbum?.cover_art}
+                <img src={convertFileSrc($currentAlbum.cover_art)} alt="" />
+              {:else}
+                <span>♪</span>
+              {/if}
+            </div>
+            <div class="now-playing-info">
+              <span class="track-name"
+                >{$currentTrack?.title ?? "No track playing"}</span
+              >
+              <span class="track-artist">{$currentTrack?.artist ?? "—"}</span>
+            </div>
+          </button>
+          {#if $currentTrack}
+            <button
+              class="np-add-btn"
+              onclick={() => {
+                playUiSfx("open");
+                npPickerOpen = true;
+              }}
+              title="Add to playlist">+</button
+            >
+          {/if}
+        </div>
+
+        <!-- PS2 action hints -->
+        <div class="actions">
+          <div class="action-hint">
+            <PS2Btn type="cross" />
+            <span class="btn-label">Select</span>
+          </div>
+          <button class="action-hint action-btn" onclick={toggleSearch}>
+            <PS2Btn type="circle" />
+            <span class="btn-label" class:active-search={searchOpen}
+              >Search</span
+            >
+          </button>
+          <button class="action-hint action-btn" onclick={handleShuffleAll}>
+            <PS2Btn type="square" />
+            <span class="btn-label" class:active-shuffle={$isShuffled}
+              >Shuffle</span
+            >
+          </button>
+          <button
+            class="action-hint action-btn"
+            onclick={() => {
+              playUiSfx("confirm");
+              toggleRepeat();
+            }}
+          >
+            <PS2Btn type="triangle" />
+            <span
+              class="btn-label repeat-label"
+              class:active-repeat={$repeatMode !== "none"}
+              >{$repeatMode === "one"
+                ? "Repeat 1"
+                : $repeatMode === "all"
+                  ? "Repeat All"
+                  : "Repeat"}</span
+            >
+          </button>
+          <button
+            class="action-hint action-btn options-btn"
+            onclick={openOptions}
+            title="Options"
+          >
+            <span class="gear-icon">⚙</span>
+          </button>
+        </div>
+      </div>
+      <!-- /footer-bottom -->
+    </footer>
   </div>
 
-  <!-- Content -->
-  <main class="content">
-    {#if activeTab === 'library'}
-      {#if $isScanning && $albums.length === 0}
-        <div class="state-msg">
-          <div class="spinner"></div>
-          <p class="scan-info">
-            {#if $scanStatus.filesScanned > 0}
-              {$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
-            {:else}
-              Starting scan…
-            {/if}
-          </p>
-        </div>
-      {:else if $albums.length === 0}
-        <div class="state-msg">
-          <p class="hint">Select <strong>⚙ Options</strong> to choose a music folder</p>
-        </div>
-      {:else}
-        {#if $isScanning}
-          <div class="scan-bar">
-            <div class="spinner-sm"></div>
-            <span>{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums found</span>
-          </div>
-        {/if}
-        {#if searchOpen && searchQuery && filteredAlbums.length === 0}
-          <div class="state-msg"><p class="hint">No results for <strong>{searchQuery}</strong></p></div>
-        {:else}
-          <AlbumGrid albums={filteredAlbums} onselect={selectAlbum} onhover={(a) => (hoveredAlbum = a)} initialPage={initialAlbumPage} />
-        {/if}
-      {/if}
-    {:else}
-      <PlaylistGrid
-        playlists={$playlists}
-        onselect={(pl) => { playUiSfx('confirm'); selectedPlaylist = pl; }}
-        onhover={(pl) => (hoveredPlaylist = pl)}
-      />
-    {/if}
-  </main>
+  {#if $selectedAlbum}
+    <AlbumView
+      album={$selectedAlbum}
+      onclose={() => {
+        selectedAlbum.set(null);
+        followPlayback = false;
+      }}
+    />
+  {/if}
 
-  <!-- Footer -->
-  <footer class="footer">
-    <!-- Row 1: progress -->
-    <div class="footer-progress">
-      <ProgressBar />
-    </div>
+  {#if selectedPlaylist}
+    <PlaylistView
+      playlist={selectedPlaylist}
+      onclose={() => (selectedPlaylist = null)}
+    />
+  {/if}
 
-    <!-- Row 2: transport + volume -->
-    <div class="footer-top">
-      <div class="transport">
-        <button
-          class="transport-btn transport-btn--shoulder"
-          onclick={handlePrev}
-          disabled={!$currentTrack}
-          title="Previous"
-        >
-          <span class="transport-tag">L1</span>
-          <span class="transport-icon">&lt;&lt;</span>
-          <span class="transport-text">Prev</span>
-        </button>
-        <button
-          class="transport-btn play-btn"
-          onclick={handleTransportPlayPause}
-          disabled={!$currentTrack}
-          title={$isPlaying ? 'Pause' : 'Play'}
-        >
-          <PS2Btn type="start" />
-          <span class="transport-text play-pause-text">{$isPlaying ? 'Pause' : 'Play'}</span>
-        </button>
-        <button
-          class="transport-btn transport-btn--shoulder"
-          onclick={handleNext}
-          disabled={!$currentTrack}
-          title="Next"
-        >
-          <span class="transport-tag">R1</span>
-          <span class="transport-icon">&gt;&gt;</span>
-          <span class="transport-text">Next</span>
-        </button>
-      </div>
-      <VolumeControl />
-    </div>
+  {#if npPickerOpen && $currentTrack}
+    <PlaylistPicker
+      track={$currentTrack}
+      onclose={() => (npPickerOpen = false)}
+    />
+  {/if}
 
-    <!-- Row 3: now-playing | volume | hints -->
-    <div class="footer-bottom">
-      <!-- Now playing -->
-      <div class="now-playing" class:active={!!$currentTrack}>
-        <button
-          class="now-playing-main"
-          onclick={openCurrentContext}
-          disabled={!$currentTrack}
-        >
-          <div class="now-playing-art">
-            {#if $currentAlbum?.cover_art}
-              <img src={convertFileSrc($currentAlbum.cover_art)} alt="" />
-            {:else}
-              <span>♪</span>
-            {/if}
-          </div>
-          <div class="now-playing-info">
-            <span class="track-name">{$currentTrack?.title ?? 'No track playing'}</span>
-            <span class="track-artist">{$currentTrack?.artist ?? '—'}</span>
-          </div>
-        </button>
-        {#if $currentTrack}
-          <button
-            class="np-add-btn"
-            onclick={() => { playUiSfx('open'); npPickerOpen = true; }}
-            title="Add to playlist"
-          >+</button>
-        {/if}
-      </div>
+  {#if optionsOpen}
+    <OptionsMenu
+      onclose={() => (optionsOpen = false)}
+      onStats={() => (statsOpen = true)}
+    />
+  {/if}
 
-    <!-- PS2 action hints -->
-      <div class="actions">
-      <div class="action-hint">
-        <PS2Btn type="cross" />
-        <span class="btn-label">Select</span>
-      </div>
-      <button class="action-hint action-btn" onclick={toggleSearch}>
-        <PS2Btn type="circle" />
-        <span class="btn-label" class:active-search={searchOpen}>Search</span>
-      </button>
-      <button class="action-hint action-btn" onclick={handleShuffleAll}>
-        <PS2Btn type="square" />
-        <span class="btn-label" class:active-shuffle={$isShuffled}>Shuffle</span>
-      </button>
-      <button class="action-hint action-btn" onclick={() => { playUiSfx('confirm'); toggleRepeat(); }}>
-        <PS2Btn type="triangle" />
-        <span class="btn-label repeat-label" class:active-repeat={$repeatMode !== 'none'}>{$repeatMode === 'one' ? 'Repeat 1' : $repeatMode === 'all' ? 'Repeat All' : 'Repeat'}</span>
-      </button>
-      <button class="action-hint action-btn options-btn" onclick={openOptions} title="Options">
-        <span class="gear-icon">⚙</span>
-      </button>
-    </div>
-    </div><!-- /footer-bottom -->
-  </footer>
-
+  {#if statsOpen}
+    <StatsView albums={$albums} onclose={() => (statsOpen = false)} />
+  {/if}
 </div>
 
-{#if $selectedAlbum}
-  <AlbumView album={$selectedAlbum} onclose={() => { selectedAlbum.set(null); followPlayback = false; }} />
-{/if}
-
-{#if selectedPlaylist}
-  <PlaylistView playlist={selectedPlaylist} onclose={() => selectedPlaylist = null} />
-{/if}
-
-{#if npPickerOpen && $currentTrack}
-  <PlaylistPicker track={$currentTrack} onclose={() => npPickerOpen = false} />
-{/if}
-
-{#if optionsOpen}
-  <OptionsMenu onclose={() => optionsOpen = false} onStats={() => statsOpen = true} />
-{/if}
-
-{#if statsOpen}
-  <StatsView albums={$albums} onclose={() => statsOpen = false} />
-{/if}
-
-</div><!-- /root -->
+<!-- /root -->
 
 <style>
   .root {
@@ -503,7 +599,7 @@
     background: #474747;
     border-radius: 2px;
     flex-shrink: 0;
-    box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+    box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
   }
 
   .memory-block {
@@ -519,7 +615,9 @@
     padding: 0;
     transition: opacity 0.15s;
   }
-  .action-btn:hover { opacity: 0.75; }
+  .action-btn:hover {
+    opacity: 0.75;
+  }
 
   .memory-label {
     font-size: 22px;
@@ -566,8 +664,14 @@
   }
 
   @keyframes fadein {
-    from { opacity: 0; transform: translateY(-3px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(-3px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   /* ── Tab toggle ── */
@@ -575,13 +679,13 @@
     position: relative;
     display: inline-flex;
     justify-self: start;
-    background: linear-gradient(180deg, rgb(22, 23, 32), rgb(28, 30, 42));
+    background: linear-gradient(180deg, rgb(48, 48, 48), rgb(54, 58, 68));
     border: 1px solid rgba(212, 219, 240, 0.08);
     border-radius: 5px;
     padding: 2px;
     box-shadow:
-      inset 0 2px 4px rgba(0,0,0,0.5),
-      inset 0 1px 0 rgba(0,0,0,0.3);
+      inset 0 2px 4px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(0, 0, 0, 0.3);
   }
 
   .tab-thumb {
@@ -590,12 +694,12 @@
     left: 2px;
     height: calc(100% - 4px);
     width: calc(50% - 2px);
-    background: linear-gradient(180deg, rgb(54, 56, 70), rgb(60, 64, 80));
+    background: linear-gradient(180deg, #474747, #272727);
     border-radius: 3px;
     border: 1px solid rgba(212, 219, 240, 0.1);
     box-shadow:
-      0 2px 4px rgba(0,0,0,0.35),
-      inset 0 1px 0 rgba(255,255,255,0.07);
+      0 2px 4px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07);
     transition: transform 0.18s cubic-bezier(0.34, 1.2, 0.64, 1);
     pointer-events: none;
   }
@@ -623,8 +727,12 @@
     white-space: nowrap;
   }
 
-  .tab-opt:hover { color: var(--text-secondary); }
-  .tab-opt--active { color: var(--text-primary); }
+  .tab-opt:hover {
+    color: var(--text-secondary);
+  }
+  .tab-opt--active {
+    color: var(--text-primary);
+  }
 
   /* ── Content ── */
   .content {
@@ -645,8 +753,12 @@
     color: var(--text-dim);
   }
 
-  .hint { font-size: 14px; }
-  .hint strong { color: var(--text-secondary); }
+  .hint {
+    font-size: 14px;
+  }
+  .hint strong {
+    color: var(--text-secondary);
+  }
 
   .scan-info {
     font-size: 12px;
@@ -682,7 +794,11 @@
     animation: spin 0.8s linear infinite;
   }
 
-  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 
   /* ── Footer ── */
   .footer {
@@ -721,7 +837,9 @@
     backdrop-filter: blur(12px);
     max-width: 210px;
     overflow: hidden;
-    transition: box-shadow 0.2s, transform 0.15s;
+    transition:
+      box-shadow 0.2s,
+      transform 0.15s;
   }
 
   .now-playing.active:hover {
@@ -742,7 +860,10 @@
     transition: opacity 0.2s;
   }
 
-  .now-playing-main:disabled { opacity: 0.45; cursor: default; }
+  .now-playing-main:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
 
   .np-add-btn {
     flex-shrink: 0;
@@ -757,10 +878,15 @@
     align-self: stretch;
     display: flex;
     align-items: center;
-    transition: color 0.12s, background 0.12s;
+    transition:
+      color 0.12s,
+      background 0.12s;
   }
 
-  .np-add-btn:hover { color: var(--track-hover); background: rgba(255,255,255,0.05); }
+  .np-add-btn:hover {
+    color: var(--track-hover);
+    background: rgba(255, 255, 255, 0.05);
+  }
 
   .now-playing-art {
     width: 26px;
@@ -826,7 +952,11 @@
       inset 0 -1px 2px rgba(0, 0, 0, 0.28);
     cursor: pointer;
     color: var(--text-secondary);
-    transition: color 0.12s, opacity 0.12s, transform 0.12s, filter 0.12s;
+    transition:
+      color 0.12s,
+      opacity 0.12s,
+      transform 0.12s,
+      filter 0.12s;
   }
 
   .transport-btn:hover:not(:disabled) {
@@ -835,7 +965,10 @@
     filter: brightness(1.06);
   }
 
-  .transport-btn:disabled { opacity: 0.38; cursor: default; }
+  .transport-btn:disabled {
+    opacity: 0.38;
+    cursor: default;
+  }
 
   .transport-btn--shoulder {
     justify-content: center;
@@ -887,7 +1020,9 @@
     color: var(--text-secondary);
     line-height: 1;
     opacity: 0.75;
-    transition: opacity 0.15s, color 0.15s;
+    transition:
+      opacity 0.15s,
+      color 0.15s;
   }
 
   .options-btn:hover .gear-icon {
@@ -907,10 +1042,20 @@
     letter-spacing: 0.03em;
   }
 
-  .active-shuffle { color: var(--track-active); }
-  .active-search  { color: var(--track-active); }
-  .active-repeat  { color: var(--track-active); }
-  .repeat-label   { display: inline-block; min-width: 58px; text-align: start;}
+  .active-shuffle {
+    color: var(--track-active);
+  }
+  .active-search {
+    color: var(--track-active);
+  }
+  .active-repeat {
+    color: var(--track-active);
+  }
+  .repeat-label {
+    display: inline-block;
+    min-width: 58px;
+    text-align: start;
+  }
 
   /* ── Search ── */
   .search-input {
@@ -924,7 +1069,9 @@
     letter-spacing: 0.01em;
     padding: 3px 8px;
     outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
     text-align: right;
   }
 
