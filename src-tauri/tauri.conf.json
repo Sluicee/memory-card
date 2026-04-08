@@ -13,7 +13,7 @@
     "windows": [
       {
         "title": "Memory Card",
-        "width": 900,
+        "width": 950,
         "height": 900,
         "resizable": false,
         "center": true

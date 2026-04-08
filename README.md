@@ -57,7 +57,7 @@ Produces a platform-native installer in `src-tauri/target/release/bundle/`.
 
 ## Notes
 
-- Window is fixed at 900x900 and non-resizable by design.
+- Window is fixed at 950x900 and non-resizable by design.
 - M4A/AAC files are decoded via symphonia entirely in memory to work around a rodio seek limitation.
 - Playback position and track-end detection use a 1-second polling loop on the frontend.
 - Settings and last-played track are stored in `localStorage`. The full library cache lives in Tauri's app data directory.
