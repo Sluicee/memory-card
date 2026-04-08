@@ -67,6 +67,21 @@
 
   let isActiveAlbum = $derived($currentTrack && album.tracks.some(t => t.id === $currentTrack!.id));
 
+  // Group tracks by disc number — used to render disc separators
+  let discGroups = $derived((() => {
+    const groups: { disc: number; tracks: Track[] }[] = [];
+    for (const track of album.tracks) {
+      const last = groups[groups.length - 1];
+      if (last && last.disc === track.disc_number) {
+        last.tracks.push(track);
+      } else {
+        groups.push({ disc: track.disc_number, tracks: [track] });
+      }
+    }
+    return groups;
+  })());
+  let hasMultipleDiscs = $derived(discGroups.length > 1);
+
   function formatDuration(secs: number): string {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
@@ -139,26 +154,31 @@
       </div>
 
       <ul class="tracklist">
-        {#each album.tracks as track (track.id)}
-          {@const active = $currentTrack?.id === track.id}
-          <li class="track" class:active>
-            <button class="track-btn" onclick={() => handleTrackClick(track)}>
-              <span class="track-num">
-                {#if active && $isPlaying}
-                  <span class="playing-dot">▶</span>
-                {:else}
-                  {track.track_number || '—'}
-                {/if}
-              </span>
-              <span class="track-title">{track.title}</span>
-              <span class="track-dur">{formatDuration(track.duration)}</span>
-            </button>
-            <button
-              class="track-add-btn"
-              onclick={(e) => { e.stopPropagation(); pickerTrack = track; }}
-              title="Add to playlist"
-            >+</button>
-          </li>
+        {#each discGroups as group}
+          {#if hasMultipleDiscs}
+            <li class="disc-header">DISC {group.disc}</li>
+          {/if}
+          {#each group.tracks as track (track.id)}
+            {@const active = $currentTrack?.id === track.id}
+            <li class="track" class:active>
+              <button class="track-btn" onclick={() => handleTrackClick(track)}>
+                <span class="track-num">
+                  {#if active && $isPlaying}
+                    <span class="playing-dot">▶</span>
+                  {:else}
+                    {track.track_number || '—'}
+                  {/if}
+                </span>
+                <span class="track-title">{track.title}</span>
+                <span class="track-dur">{formatDuration(track.duration)}</span>
+              </button>
+              <button
+                class="track-add-btn"
+                onclick={(e) => { e.stopPropagation(); pickerTrack = track; }}
+                title="Add to playlist"
+              >+</button>
+            </li>
+          {/each}
         {/each}
       </ul>
     </div>
@@ -271,6 +291,22 @@
 
   .album-artist { font-size: 13px; color: var(--text-secondary); margin: 0; }
   .album-year   { font-size: 11px; color: var(--text-dim); margin: 0; }
+
+  /* ── Disc header ── */
+  .disc-header {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    padding: 8px 6px 3px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 2px;
+    list-style: none;
+  }
+  .disc-header:first-child {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 2px;
+  }
 
   /* ── Tracklist ── */
   .tracklist {

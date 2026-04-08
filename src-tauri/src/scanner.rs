@@ -179,6 +179,57 @@ fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option
     Some(dest.to_string_lossy().into_owned())
 }
 
+/// Strip "feat."/"ft."/"featuring" and everything after it from an artist string.
+/// Used for album key normalization so "Artist feat. Guest" groups with "Artist".
+fn strip_feat(artist: &str) -> &str {
+    let lower = artist.to_lowercase();
+    let patterns = [" feat. ", " feat ", " ft. ", " ft ", " featuring ", " (feat.", " (ft."];
+    let mut min_idx = artist.len();
+    for pattern in patterns {
+        if let Some(idx) = lower.find(pattern) {
+            if idx < min_idx {
+                min_idx = idx;
+            }
+        }
+    }
+    artist[..min_idx].trim()
+}
+
+/// Strip disc-number suffix from album title for grouping purposes.
+/// "Album (Disc 1)" → "Album", "Album Disc 2" → "Album", "Album [CD 1]" → "Album"
+fn strip_disc_suffix(album: &str) -> &str {
+    let trimmed = album.trim();
+    let lower = trimmed.to_lowercase();
+
+    // Bracketed forms: (Disc N), [Disc N], (CD N), [CD N]
+    for (open, close, keyword) in [('(', ')', "disc "), ('(', ')', "cd "), ('[', ']', "disc "), ('[', ']', "cd ")] {
+        if lower.ends_with(close) {
+            if let Some(start) = lower.rfind(open) {
+                let inner = &lower[start + 1..lower.len() - 1];
+                if let Some(rest) = inner.strip_prefix(keyword) {
+                    if !rest.is_empty() && rest.trim_start_matches(|c: char| c.is_ascii_digit()).is_empty() {
+                        return trimmed[..start].trim_end();
+                    }
+                }
+            }
+        }
+    }
+
+    // Unbracketed forms at end: " Disc N", " CD N"
+    for keyword in ["disc ", "cd "] {
+        if let Some(idx) = lower.rfind(keyword) {
+            let after = &lower[idx + keyword.len()..];
+            if !after.is_empty() && after.trim_start_matches(|c: char| c.is_ascii_digit()).is_empty() {
+                if idx == 0 || lower.as_bytes()[idx - 1] == b' ' {
+                    return trimmed[..idx].trim_end();
+                }
+            }
+        }
+    }
+
+    trimmed
+}
+
 /// Scan a folder and return all albums with embedded or folder-based cover art.
 /// Internet cover fetching is handled separately in lib.rs (async context).
 pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path) -> Vec<Album> {
@@ -221,12 +272,13 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
 
     for (result, audio_path) in results {
         let TrackResult { track, cover } = result;
-        // Normalize key: trim whitespace + lowercase to merge tracks whose tags
-        // differ only in case or surrounding whitespace (common tagging inconsistency).
+        // Normalize key: strip feat./ft. from album artist, disc suffixes from album
+        // title, then lowercase — so "Artist feat. X" and "Album (Disc 2)" group
+        // with their respective main artist/album entries.
         let album_key = format!(
             "{}::{}",
-            track.album_artist.trim().to_lowercase(),
-            track.album.trim().to_lowercase()
+            strip_feat(track.album_artist.trim()).to_lowercase(),
+            strip_disc_suffix(track.album.trim()).to_lowercase()
         );
         let album = albums.entry(album_key.clone()).or_insert_with(|| Album {
             id: album_key,
