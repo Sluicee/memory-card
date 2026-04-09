@@ -10,6 +10,34 @@
     "window-state:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "args": [
+            { "validator": "-ss" },
+            { "validator": ".*" },
+            { "validator": "-i" },
+            { "validator": ".*" },
+            { "validator": "-f" },
+            { "validator": "f32le" },
+            { "validator": "-ac" },
+            { "validator": "2" },
+            { "validator": "-ar" },
+            { "validator": "44100" },
+            { "validator": "-af" },
+            { "validator": "volume=1.0" },
+            { "validator": "-vn" },
+            { "validator": "-sn" },
+            { "validator": "-map_metadata" },
+            { "validator": "-1" },
+            { "validator": "pipe:1" }
+          ],
+          "sidecar": true,
+          "name": "binaries/ffmpeg"
+        }
+      ]
+    }
   ]
 }

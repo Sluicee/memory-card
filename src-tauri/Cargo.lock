@@ -2645,10 +2645,11 @@ dependencies = [
 
 [[package]]
 name = "musicplayer"
-version = "0.1.0"
+version = "1.2.1"
 dependencies = [
  "any_ascii",
  "base64 0.22.1",
+ "cpal",
  "discord-rich-presence",
  "futures",
  "image",
@@ -2656,6 +2657,7 @@ dependencies = [
  "rayon",
  "reqwest 0.12.28",
  "rodio",
+ "rtrb",
  "semver",
  "serde",
  "serde_json",
@@ -3886,6 +3888,12 @@ dependencies = [
  "lewton",
  "symphonia",
 ]
+
+[[package]]
+name = "rtrb"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7204ed6420f698836b76d4d5c2ec5dec7585fd5c3a788fd1cde855d1de598239"
 
 [[package]]
 name = "rustc-hash"

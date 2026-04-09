@@ -2,6 +2,7 @@ mod audio;
 mod scanner;
 mod media_controls;
 mod discord_rpc;
+mod ffmpeg_source;
 
 use audio::{create_player, PlaybackState, SharedPlayer};
 use media_controls::MediaControlsManager;
@@ -336,15 +337,17 @@ pub fn run() {
     #[cfg(windows)]
     set_app_id();
 
-    let player = create_player();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .manage(player)
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            let player = create_player(app.handle().clone());
+            app.manage(player);
+
             let manager = MediaControlsManager::new(app.handle());
             app.manage(manager);
             Ok(())

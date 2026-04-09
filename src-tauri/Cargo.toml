@@ -1,6 +1,6 @@
 [package]
 name = "musicplayer"
-version = "0.1.0"
+version = "1.2.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -32,6 +32,8 @@ futures = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 base64 = "0.22"
 rodio = { version = "0.20", features = ["symphonia-all"] }
+rtrb = "0.3"
+cpal = "0.15"
 symphonia = { version = "0.5", features = ["all"] }
 tokio = { version = "1", features = ["sync", "rt"] }
 souvlaki = "0.8"
@@ -46,6 +48,7 @@ version = "0.58.0"
 features = [
     "Win32_Foundation",
     "Win32_System_Com",
+    "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",

@@ -204,7 +204,8 @@ export async function playTrack(track: Track, album: Album, fromShuffle = false)
     isPaused.set(false);
     saveLastTrack(track, album);
     startPolling();
-    preloadNext();
+    // Small delay to let the current track stabilize before starting disk I/O for the next one.
+    setTimeout(() => preloadNext(), 500);
   } catch (e) {
     console.error('Play failed:', e);
   }

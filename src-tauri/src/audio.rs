@@ -1,23 +1,14 @@
-use rodio::{source::SeekError, OutputStream, OutputStreamHandle, Sink, Source};
+use crate::ffmpeg_source::FFmpegSource;
+use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{Decoder as SymphoniaDecoder, DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, SeekedTo};
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
-use symphonia::core::units::Time;
-
-const MAX_DECODE_RETRIES: usize = 3;
+use tauri::AppHandle;
 
 enum Cmd {
     Play { path: String, duration: f64 },
-    Preload { path: String },
+    Preload { _path: String },
     Seek { position: f64 },
     Pause,
     Resume,
@@ -68,278 +59,38 @@ pub struct PlaybackState {
     pub position_secs: f64,
 }
 
-struct SeekableSource {
-    format: Box<dyn FormatReader>,
-    decoder: Box<dyn SymphoniaDecoder>,
-    track_id: u32,
-    buffer: Vec<f32>,
-    buf_pos: usize,
-    channels: u16,
-    sample_rate: u32,
-    total_duration: Option<Duration>,
-    done: bool,
-}
-
-impl SeekableSource {
-    fn open(path: &str) -> Result<Self, String> {
-        let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-        let mut hint = Hint::new();
-        if let Some(ext) = Path::new(path).extension().and_then(|ext| ext.to_str()) {
-            hint.with_extension(ext);
-        }
-
-        let probed = symphonia::default::get_probe()
-            .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
-            .map_err(|e| e.to_string())?;
-
-        let format = probed.format;
-        let track = format
-            .tracks()
-            .iter()
-            .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
-            .cloned()
-            .or_else(|| format.default_track().cloned())
-            .ok_or_else(|| "No supported audio track found".to_string())?;
-
-        let track_id = track.id;
-        let channels = track
-            .codec_params
-            .channels
-            .map(|c| c.count() as u16)
-            .unwrap_or(2);
-        let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
-        let total_duration = track
-            .codec_params
-            .time_base
-            .zip(track.codec_params.n_frames)
-            .map(|(base, frames)| time_to_duration(base.calc_time(frames)));
-
-        let decoder = symphonia::default::get_codecs()
-            .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|e| e.to_string())?;
-
-        Ok(Self {
-            format,
-            decoder,
-            track_id,
-            buffer: Vec::new(),
-            buf_pos: 0,
-            channels,
-            sample_rate,
-            total_duration,
-            done: false,
-        })
-    }
-
-    fn decode_packet(&mut self, packet: &symphonia::core::formats::Packet) -> Result<(), SymphoniaError> {
-        let decoded = self.decoder.decode(packet)?;
-        let spec = *decoded.spec();
-        self.channels = spec.channels.count() as u16;
-        self.sample_rate = spec.rate;
-
-        let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
-        buf.copy_interleaved_ref(decoded);
-        self.buffer.clear();
-        self.buffer.extend_from_slice(buf.samples());
-        self.buf_pos = 0;
-        Ok(())
-    }
-
-    fn fill_buffer(&mut self) {
-        self.buffer.clear();
-        self.buf_pos = 0;
-
-        while self.buffer.is_empty() && !self.done {
-            let packet = match self.format.next_packet() {
-                Ok(packet) => packet,
-                Err(_) => {
-                    self.done = true;
-                    break;
-                }
-            };
-
-            if packet.track_id() != self.track_id {
-                continue;
-            }
-
-            match self.decode_packet(&packet) {
-                Ok(()) => {}
-                Err(SymphoniaError::DecodeError(_)) => continue,
-                Err(_) => {
-                    self.done = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    fn refine_position(&mut self, seek_res: SeekedTo) -> Result<(), SeekError> {
-        let mut samples_to_skip = seek_res.required_ts.saturating_sub(seek_res.actual_ts);
-
-        let packet = loop {
-            let packet = self
-                .format
-                .next_packet()
-                .map_err(|e| SeekError::Other(Box::new(e)))?;
-
-            if packet.track_id() != self.track_id {
-                continue;
-            }
-
-            if packet.dur() > samples_to_skip {
-                break packet;
-            }
-
-            samples_to_skip = samples_to_skip.saturating_sub(packet.dur());
-        };
-
-        let mut decoded = self.decoder.decode(&packet);
-        for _ in 0..MAX_DECODE_RETRIES {
-            if decoded.is_ok() {
-                break;
-            }
-
-            let retry_packet = loop {
-                let packet = self
-                    .format
-                    .next_packet()
-                    .map_err(|e| SeekError::Other(Box::new(e)))?;
-
-                if packet.track_id() == self.track_id {
-                    break packet;
-                }
-            };
-
-            decoded = self.decoder.decode(&retry_packet);
-        }
-
-        let decoded = decoded.map_err(|e| SeekError::Other(Box::new(e)))?;
-        let spec = *decoded.spec();
-        self.channels = spec.channels.count() as u16;
-        self.sample_rate = spec.rate;
-
-        let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
-        buf.copy_interleaved_ref(decoded);
-        self.buffer.clear();
-        self.buffer.extend_from_slice(buf.samples());
-        self.buf_pos = samples_to_skip as usize * self.channels as usize;
-        self.done = false;
-        Ok(())
-    }
-}
-
-impl Iterator for SeekableSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<f32> {
-        if self.buf_pos >= self.buffer.len() {
-            if self.done {
-                return None;
-            }
-
-            self.fill_buffer();
-            if self.buffer.is_empty() {
-                return None;
-            }
-        }
-
-        let sample = self.buffer[self.buf_pos];
-        self.buf_pos += 1;
-        Some(sample)
-    }
-}
-
-impl Source for SeekableSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        self.channels
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        self.total_duration
-    }
-
-    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
-        let target = match self.total_duration {
-            Some(total) if total.saturating_sub(pos).as_millis() < 1 => {
-                skip_back_a_tiny_bit(duration_to_time(total))
-            }
-            _ => duration_to_time(pos),
-        };
-
-        let seek_res = self
-            .format
-            .seek(
-                SeekMode::Accurate,
-                SeekTo::Time {
-                    time: target,
-                    track_id: Some(self.track_id),
-                },
-            )
-            .map_err(|e| SeekError::Other(Box::new(e)))?;
-
-        self.refine_position(seek_res)
-    }
-}
-
-fn time_to_duration(time: Time) -> Duration {
-    Duration::from_secs_f64(time.seconds as f64 + time.frac)
-}
-
-fn duration_to_time(duration: Duration) -> Time {
-    Time::from(duration.as_secs_f64())
-}
-
-fn skip_back_a_tiny_bit(
-    Time {
-        mut seconds,
-        mut frac,
-    }: Time,
-) -> Time {
-    frac -= 0.0001;
-    if frac < 0.0 {
-        seconds = seconds.saturating_sub(1);
-        frac = 1.0 + frac;
-    }
-    Time { seconds, frac }
-}
-
 fn build_sink(
+    app_handle: &AppHandle,
     handle: &OutputStreamHandle,
     path: &str,
     volume: f32,
     seek_secs: f64,
 ) -> Result<Sink, String> {
-    let source = SeekableSource::open(path)?;
-    build_sink_from_source(handle, source, volume, seek_secs)
-}
-
-fn build_sink_from_source(
-    handle: &OutputStreamHandle,
-    mut source: SeekableSource,
-    volume: f32,
-    seek_secs: f64,
-) -> Result<Sink, String> {
+    let source =
+        FFmpegSource::new(app_handle, path, seek_secs)?.fade_in(Duration::from_millis(100)); // Smooth start
     let sink = Sink::try_new(handle).map_err(|e| e.to_string())?;
     sink.set_volume(volume);
-
-    if seek_secs > 0.0 {
-        source
-            .try_seek(Duration::from_secs_f64(seek_secs))
-            .map_err(|e| e.to_string())?;
-    }
-
     sink.append(source);
     Ok(sink)
+}
+
+fn gently_stop(sink: Option<Sink>) {
+    if let Some(s) = sink {
+        if s.empty() {
+            s.stop();
+            return;
+        }
+        // Spawn a thread to fade out the old sink to avoid the "pop"
+        std::thread::spawn(move || {
+            let start_vol = s.volume();
+            let steps = 20;
+            for i in (0..steps).rev() {
+                s.set_volume(start_vol * (i as f32 / steps as f32));
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            s.stop();
+        });
+    }
 }
 
 pub struct AudioPlayer {
@@ -348,7 +99,7 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
-    pub fn new() -> Self {
+    pub fn new(app_handle: AppHandle) -> Self {
         let (tx, rx) = mpsc::channel::<Cmd>();
         let state = Arc::new(Mutex::new(Inner::new()));
         let state_thread = Arc::clone(&state);
@@ -358,8 +109,15 @@ impl AudioPlayer {
                 return;
             };
 
+            // Pre-warm the sidecar in a SEPARATE thread so it doesn't block the main audio loop.
+            // Spawning FFmpeg for the first time on Windows can take 1s+ due to AV scanning.
+            let ah = app_handle.clone();
+            let h = handle.clone();
+            std::thread::spawn(move || {
+                let _ = build_sink(&ah, &h, "prewarm", 0.0, 0.0);
+            });
+
             let mut sink: Option<Sink> = None;
-            let mut preloaded: Option<(String, SeekableSource)> = None;
 
             loop {
                 let cmd = match rx.recv_timeout(Duration::from_millis(500)) {
@@ -384,24 +142,13 @@ impl AudioPlayer {
                 match cmd {
                     Cmd::Play { path, duration } => {
                         eprintln!("[audio] Play: {path}");
+                        gently_stop(sink.take()); // Fade out old track immediately
+
                         let volume = state_thread.lock().unwrap().volume;
 
-                        let build_res = if let Some((p, src)) = preloaded.take() {
-                            if p == path {
-                                eprintln!("[audio] Using preloaded source for {path}");
-                                build_sink_from_source(&handle, src, volume, 0.0)
-                            } else {
-                                build_sink(&handle, &path, volume, 0.0)
-                            }
-                        } else {
-                            build_sink(&handle, &path, volume, 0.0)
-                        };
-
-                        match build_res {
+                        match build_sink(&app_handle, &handle, &path, volume, 0.0) {
                             Ok(new_sink) => {
-                                if let Some(old_sink) = sink.replace(new_sink) {
-                                    old_sink.stop();
-                                }
+                                sink = Some(new_sink);
 
                                 let mut st = state_thread.lock().unwrap();
                                 st.is_playing = true;
@@ -414,19 +161,12 @@ impl AudioPlayer {
                             Err(e) => eprintln!("[audio] Play failed: {e}"),
                         }
                     }
-                    Cmd::Preload { path } => {
-                        if preloaded.as_ref().map(|(p, _)| p == &path).unwrap_or(false) {
-                            continue;
-                        }
-                        match SeekableSource::open(&path) {
-                            Ok(src) => {
-                                eprintln!("[audio] Preloaded: {path}");
-                                preloaded = Some((path, src));
-                            }
-                            Err(e) => eprintln!("[audio] Preload failed for {path}: {e}"),
-                        }
+                    Cmd::Preload { _path: _ } => {
+                        // Preloading raw pipes is complex; skipping for now to keep it robust.
                     }
                     Cmd::Seek { position } => {
+                        gently_stop(sink.take()); // Fade out current track immediately
+
                         let (path, duration, volume, was_paused) = {
                             let st = state_thread.lock().unwrap();
                             (
@@ -440,17 +180,14 @@ impl AudioPlayer {
                         let Some(path) = path else { continue };
                         let target = position.clamp(0.0, duration.max(0.0));
 
-                        let seek_result = sink
-                            .as_ref()
-                            .ok_or_else(|| "No active sink".to_string())
-                            .and_then(|current_sink| {
-                                current_sink
-                                    .try_seek(Duration::from_secs_f64(target))
-                                    .map_err(|e| e.to_string())
-                            });
+                        match build_sink(&app_handle, &handle, &path, volume, target) {
+                            Ok(new_sink) => {
+                                if was_paused {
+                                    new_sink.pause();
+                                }
 
-                        match seek_result {
-                            Ok(()) => {
+                                sink = Some(new_sink);
+
                                 let mut st = state_thread.lock().unwrap();
                                 st.is_playing = !was_paused;
                                 st.is_paused = was_paused;
@@ -462,38 +199,9 @@ impl AudioPlayer {
                                     Some(Instant::now())
                                 };
                                 st.elapsed_before_pause = target;
+                                eprintln!("[audio] Seek to {}", target);
                             }
-                            Err(seek_err) => match build_sink(&handle, &path, volume, target) {
-                                Ok(new_sink) => {
-                                    if was_paused {
-                                        new_sink.pause();
-                                    }
-
-                                    if let Some(old_sink) = sink.replace(new_sink) {
-                                        old_sink.stop();
-                                    }
-
-                                    let mut st = state_thread.lock().unwrap();
-                                    st.is_playing = !was_paused;
-                                    st.is_paused = was_paused;
-                                    st.current_path = Some(path);
-                                    st.duration_secs = duration;
-                                    st.play_started_at = if was_paused {
-                                        None
-                                    } else {
-                                        Some(Instant::now())
-                                    };
-                                    st.elapsed_before_pause = target;
-                                    eprintln!(
-                                        "[audio] Seek fallback after try_seek failure: {seek_err}"
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "[audio] Seek failed: {seek_err}; fallback failed: {e}"
-                                    )
-                                }
-                            },
+                            Err(e) => eprintln!("[audio] Seek failed: {e}"),
                         }
                     }
                     Cmd::Pause => {
@@ -520,9 +228,7 @@ impl AudioPlayer {
                         }
                     }
                     Cmd::Stop => {
-                        if let Some(current_sink) = sink.take() {
-                            current_sink.stop();
-                        }
+                        gently_stop(sink.take());
 
                         let mut st = state_thread.lock().unwrap();
                         st.is_playing = false;
@@ -557,7 +263,7 @@ impl AudioPlayer {
 
     pub fn preload(&self, path: &str) {
         let _ = self.tx.send(Cmd::Preload {
-            path: path.to_string(),
+            _path: path.to_string(),
         });
     }
 
@@ -605,6 +311,6 @@ impl AudioPlayer {
 
 pub type SharedPlayer = Arc<AudioPlayer>;
 
-pub fn create_player() -> SharedPlayer {
-    Arc::new(AudioPlayer::new())
+pub fn create_player(app_handle: AppHandle) -> SharedPlayer {
+    Arc::new(AudioPlayer::new(app_handle))
 }
