@@ -3,9 +3,17 @@ use souvlaki::{MediaControls, MediaPlayback, MediaPosition, PlatformConfig};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::CreateBitmap;
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+use windows::Win32::UI::Shell::{
+    ITaskbarList3, TaskbarList, THUMBBUTTON, THUMBBUTTONFLAGS,
+    THBF_DISABLED, THBF_ENABLED, THB_FLAGS, THB_ICON, THB_TOOLTIP,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, RegisterWindowMessageW, SetWindowLongPtrW, GWLP_WNDPROC, WM_COMMAND, WNDPROC,
+    CallWindowProcW, CreateIconIndirect, ICONINFO,
+    RegisterWindowMessageW, SetWindowLongPtrW,
+    GWLP_WNDPROC, HICON, WM_COMMAND, WNDPROC,
 };
 
 // Windows numeric constants
@@ -18,6 +26,11 @@ const BTN_NEXT: u16 = 3;
 static mut ORIGINAL_WNDPROC: Option<WNDPROC> = None;
 static mut APP_HANDLE: Option<AppHandle> = None;
 static mut TASKBAR_CREATED_MSG: u32 = 0;
+static mut THUMBNAIL_HWND: HWND = HWND(std::ptr::null_mut());
+static mut ICON_PREV:  HICON = HICON(std::ptr::null_mut());
+static mut ICON_PLAY:  HICON = HICON(std::ptr::null_mut());
+static mut ICON_PAUSE: HICON = HICON(std::ptr::null_mut());
+static mut ICON_NEXT:  HICON = HICON(std::ptr::null_mut());
 
 #[derive(Default, Clone)]
 struct TrackMetadata {
@@ -64,10 +77,6 @@ impl MediaControlsManager {
         };
 
         manager.init_smtc(app);
-
-        // Thumbnail Toolbar disabled due to Explorer crashes.
-        // manager.init_thumbnail_toolbar();
-
         manager
     }
 
@@ -115,6 +124,7 @@ impl MediaControlsManager {
             *play_lock = (is_playing, position_ms);
         }
         self.update_discord();
+        unsafe { update_thumbnail_play_state(is_playing) };
 
         if let Some(controls) = self.controls.lock().unwrap().as_mut() {
             let state = if is_playing {
@@ -212,7 +222,155 @@ fn get_hwnd_val<R: Runtime>(app: &tauri::AppHandle<R>) -> isize {
     }
 }
 
-// init_thumbnail_toolbar_raw removed to prevent crashes.
+fn encode_tip(s: &str) -> [u16; 260] {
+    let mut buf = [0u16; 260];
+    for (i, c) in s.encode_utf16().enumerate().take(259) {
+        buf[i] = c;
+    }
+    buf
+}
+
+unsafe fn make_thumb_button(id: u16, hicon: HICON, tip: &str, flags: THUMBBUTTONFLAGS) -> THUMBBUTTON {
+    let mut b: THUMBBUTTON = std::mem::zeroed();
+    b.dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
+    b.iId = id as u32;
+    b.hIcon = hicon;
+    b.szTip = encode_tip(tip);
+    b.dwFlags = flags;
+    b
+}
+
+// ── Icon creation ─────────────────────────────────────────────────────────────
+//
+// 16×16 monochrome icons built from pixel coordinate lists.
+// Windows XOR/AND icon rendering:
+//   AND=0, XOR=1  → white pixel
+//   AND=1, XOR=0  → transparent (background shows through)
+//
+// All shapes use rows 2-13 (12 rows), centered at y=7.5.
+// d = distance from center row = narrowing factor (0 = widest, 5 = tip)
+//
+// ◀| PREV:  left-pointing triangle (x=5+d..11) + bar (x=2,3)
+// ▶  PLAY:  right-pointing triangle (x=3..9-d)
+// ⏸  PAUSE: two bars (x=4,5 and x=9,10)
+// ▶| NEXT:  right-pointing triangle (x=4..10-d) + bar (x=12,13)
+
+fn d_at(y: usize) -> usize {
+    if y <= 7 { 7 - y } else { y - 8 }
+}
+
+fn prev_pixels(p: &mut Vec<(usize, usize)>) {
+    for y in 2..=13usize {
+        let d = d_at(y);
+        p.push((y, 2)); p.push((y, 3));          // bar
+        for x in (5 + d)..=11 { p.push((y, x)); } // ◀ triangle
+    }
+}
+fn play_pixels(p: &mut Vec<(usize, usize)>) {
+    for y in 2..=13usize {
+        for x in 3..=(9 - d_at(y)) { p.push((y, x)); } // ▶ triangle
+    }
+}
+fn pause_pixels(p: &mut Vec<(usize, usize)>) {
+    for y in 2..=13usize {
+        p.push((y, 4)); p.push((y, 5));   // bar 1
+        p.push((y, 9)); p.push((y, 10));  // bar 2
+    }
+}
+fn next_pixels(p: &mut Vec<(usize, usize)>) {
+    for y in 2..=13usize {
+        let d = d_at(y);
+        for x in 4..=(10 - d) { p.push((y, x)); } // ▶ triangle
+        p.push((y, 12)); p.push((y, 13));           // bar
+    }
+}
+
+/// Build 1bpp color + AND-mask byte arrays.
+/// CreateBitmap (DDB) uses WORD-alignment: 2 bytes per row for a 16-px-wide bitmap.
+fn build_icon_bits(pixels: &[(usize, usize)]) -> ([u8; 32], [u8; 32]) {
+    let mut color = [0x00_u8; 32];
+    let mut mask  = [0xFF_u8; 32]; // all transparent
+    for &(y, x) in pixels {
+        let byte = y * 2 + x / 8;  // 2 bytes per row
+        let bit  = 0x80_u8 >> (x % 8);
+        color[byte] |= bit;
+        mask[byte]  &= !bit; // 0 = opaque
+    }
+    (color, mask)
+}
+
+unsafe fn create_monochrome_icon(color: &[u8; 32], mask: &[u8; 32]) -> HICON {
+    let hbm_mask  = CreateBitmap(16, 16, 1, 1, Some(mask.as_ptr()  as *const _));
+    let hbm_color = CreateBitmap(16, 16, 1, 1, Some(color.as_ptr() as *const _));
+    let info = ICONINFO {
+        fIcon: BOOL(1),
+        xHotspot: 0,
+        yHotspot: 0,
+        hbmMask:  hbm_mask,
+        hbmColor: hbm_color,
+    };
+    // GDI bitmaps are intentionally not freed — icons live for the process lifetime
+    CreateIconIndirect(&info).unwrap_or(HICON(std::ptr::null_mut()))
+}
+
+unsafe fn create_icon(fill: fn(&mut Vec<(usize, usize)>)) -> HICON {
+    let mut pixels = Vec::new();
+    fill(&mut pixels);
+    let (color, mask) = build_icon_bits(&pixels);
+    create_monochrome_icon(&color, &mask)
+}
+
+// ── Thumbnail toolbar ─────────────────────────────────────────────────────────
+
+unsafe fn init_thumbnail_toolbar(hwnd: HWND) {
+    THUMBNAIL_HWND = hwnd;
+
+    let taskbar: ITaskbarList3 = match CoCreateInstance(&TaskbarList, None, CLSCTX_ALL) {
+        Ok(t) => t,
+        Err(e) => { eprintln!("ThumbBar: CoCreateInstance failed: {:?}", e); return; }
+    };
+    if let Err(e) = taskbar.HrInit() {
+        eprintln!("ThumbBar: HrInit failed: {:?}", e); return;
+    }
+
+    ICON_PREV  = create_icon(prev_pixels);
+    ICON_PLAY  = create_icon(play_pixels);
+    ICON_PAUSE = create_icon(pause_pixels);
+    ICON_NEXT  = create_icon(next_pixels);
+
+    let buttons = [
+        make_thumb_button(BTN_PREV,       ICON_PREV, "Previous", THBF_ENABLED),
+        make_thumb_button(BTN_PLAY_PAUSE, ICON_PLAY, "Play",     THBF_ENABLED),
+        make_thumb_button(BTN_NEXT,       ICON_NEXT, "Next",     THBF_ENABLED),
+    ];
+    if let Err(e) = taskbar.ThumbBarAddButtons(hwnd, &buttons) {
+        eprintln!("ThumbBar: ThumbBarAddButtons failed: {:?}", e);
+    } else {
+        println!("ThumbBar: initialized");
+    }
+}
+
+/// Swap play↔pause icon and dim prev/next while paused.
+unsafe fn update_thumbnail_play_state(is_playing: bool) {
+    let hwnd = THUMBNAIL_HWND;
+    if hwnd.0.is_null() { return; }
+
+    let taskbar: ITaskbarList3 = match CoCreateInstance(&TaskbarList, None, CLSCTX_ALL) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let _ = taskbar.HrInit();
+
+    let side_flags          = if is_playing { THBF_ENABLED } else { THBF_DISABLED };
+    let (pp_icon, pp_tip)   = if is_playing { (ICON_PAUSE, "Pause") } else { (ICON_PLAY, "Play") };
+
+    let buttons = [
+        make_thumb_button(BTN_PREV,       ICON_PREV, "Previous", side_flags),
+        make_thumb_button(BTN_PLAY_PAUSE, pp_icon,   pp_tip,     THBF_ENABLED),
+        make_thumb_button(BTN_NEXT,       ICON_NEXT, "Next",     side_flags),
+    ];
+    let _ = taskbar.ThumbBarUpdateButtons(hwnd, &buttons);
+}
 
 unsafe extern "system" fn wndproc_hook(
     hwnd: HWND,
@@ -220,6 +378,11 @@ unsafe extern "system" fn wndproc_hook(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    // TaskbarButtonCreated fires once Explorer is ready — safe to add buttons here
+    if TASKBAR_CREATED_MSG != 0 && msg == TASKBAR_CREATED_MSG {
+        init_thumbnail_toolbar(hwnd);
+    }
+
     if msg == WM_COMMAND {
         let hiw = (wparam.0 >> 16) as u16;
         let low = (wparam.0 & 0xFFFF) as u16;
