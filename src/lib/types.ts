@@ -22,3 +22,8 @@ export interface Album {
   total_duration: number;
   search_index: string;
 }
+
+export interface Artist {
+  name: string;
+  albums: Album[];
+}

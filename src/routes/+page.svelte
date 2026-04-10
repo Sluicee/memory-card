@@ -8,6 +8,7 @@
   import type AlbumViewType from "$lib/components/AlbumView.svelte";
   import PlaylistGrid from "$lib/components/PlaylistGrid.svelte";
   import PlaylistView from "$lib/components/PlaylistView.svelte";
+  import ArtistGrid from "$lib/components/ArtistGrid.svelte";
   import VolumeControl from "$lib/components/VolumeControl.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import PS2Btn from "$lib/components/PS2Btn.svelte";
@@ -62,14 +63,16 @@
   } from "$lib/stores/player";
   import { playlists } from "$lib/stores/playlists";
   import { currentPlaylistId } from "$lib/stores/player";
-  import type { Album } from "$lib/types";
+  import type { Album, Artist } from "$lib/types";
   import type { Playlist } from "$lib/stores/playlists";
 
-  let activeTab = $state<"library" | "playlists">("library");
+  let activeTab = $state<"library" | "artists" | "playlists">("library");
   let initialAlbumPage = $state(0);
   let hoveredAlbum = $state<Album | null>(null);
+  let hoveredArtist = $state<Artist | null>(null);
   let hoveredPlaylist = $state<Playlist | null>(null);
   let selectedPlaylist = $state<Playlist | null>(null);
+  let selectedArtistFilter = $state<string | null>(null);
   let optionsOpen = $state(false);
   let statsOpen = $state(false);
   let npPickerOpen = $state(false);
@@ -78,12 +81,36 @@
   let searchInput = $state<HTMLInputElement | null>(null);
   let followPlayback = $state(false);
 
+  $effect(() => {
+    if (activeTab !== "library" && selectedArtistFilter !== null) {
+      selectedArtistFilter = null;
+    }
+  });
+
   // Component refs for gamepad cursor control
   let albumGrid = $state<AlbumGridType | null>(null);
   let albumView = $state<AlbumViewType | null>(null);
   let optionsMenu = $state<OptionsMenuType | null>(null);
   // Gamepad focus on the now-playing footer block
   let gpNowPlayingFocused = $state(false);
+
+  const groupedArtists = $derived(
+    Object.values(
+      $albums.reduce((acc, album) => {
+        const artistName = album.artist || 'Unknown Artist';
+        if (!acc[artistName]) {
+          acc[artistName] = { name: artistName, albums: [] };
+        }
+        acc[artistName].albums.push(album);
+        return acc;
+      }, {} as Record<string, Artist>)
+    )
+    .filter(a => {
+      if (!searchOpen || !searchQuery.trim()) return true;
+      return a.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+  );
 
   const filteredAlbums = $derived(
     searchOpen && searchQuery.trim()
@@ -102,7 +129,9 @@
               ),
           );
         })()
-      : $albums,
+      : selectedArtistFilter
+        ? $albums.filter(a => a.artist === selectedArtistFilter)
+        : $albums,
   );
 
   function toggleSearch() {
@@ -192,6 +221,9 @@
           playUiSfx("back");
           searchOpen = false;
           searchQuery = "";
+        } else if (selectedArtistFilter) {
+          playUiSfx("back");
+          selectedArtistFilter = null;
         }
         break;
       case "Digit1":
@@ -199,6 +231,10 @@
         playUiSfx("back");
         break;
       case "Digit2":
+        activeTab = "artists";
+        playUiSfx("confirm");
+        break;
+      case "Digit3":
         activeTab = "playlists";
         playUiSfx("confirm");
         break;
@@ -403,7 +439,7 @@
         if ($currentTrack) handleTransportPlayPause();
         break;
       case "select":
-        activeTab = activeTab === "library" ? "playlists" : "library";
+        activeTab = activeTab === "library" ? "artists" : activeTab === "artists" ? "playlists" : "library";
         playUiSfx("confirm");
         albumGrid?.gamepadClearCursor();
         gpNowPlayingFocused = false;
@@ -594,7 +630,7 @@
         </div>
 
         <div class="header-right">
-          {#if searchOpen && activeTab === "library"}
+          {#if searchOpen && (activeTab === "library" || activeTab === "artists")}
             <input
               bind:this={searchInput}
               bind:value={searchQuery}
@@ -607,10 +643,17 @@
           {:else if $isScanning}
             <span class="scanning">{$t("scanning")}</span>
           {/if}
-          {#if activeTab === "library" && hoveredAlbum}
+          {#if activeTab === "library" && hoveredAlbum && !selectedArtistFilter}
             <span class="hovered-title" class:hovered-title--small={searchOpen}
               >{hoveredAlbum.title}</span
             >
+          {:else if selectedArtistFilter && activeTab === "library"}
+            <span class="hovered-title" style="display:flex; align-items:center; gap: 8px;">
+              {selectedArtistFilter}
+              <button class="action-btn" onclick={() => { playUiSfx("back"); selectedArtistFilter = null; }} style="font-size: 20px; color: var(--text-dim)">&times;</button>
+            </span>
+          {:else if activeTab === "artists" && hoveredArtist}
+            <span class="hovered-title">{hoveredArtist.name}</span>
           {:else if activeTab === "playlists" && hoveredPlaylist}
             <span class="hovered-title">{hoveredPlaylist.name}</span>
           {/if}
@@ -621,7 +664,8 @@
       <div class="tab-toggle">
         <div
           class="tab-thumb"
-          class:tab-thumb--right={activeTab === "playlists"}
+          class:tab-thumb--artists={activeTab === "artists"}
+          class:tab-thumb--playlists={activeTab === "playlists"}
         ></div>
         <button
           class="tab-opt"
@@ -630,6 +674,14 @@
             activeTab = "library";
             playUiSfx("back");
           }}>{$t("library")}</button
+        >
+        <button
+          class="tab-opt"
+          class:tab-opt--active={activeTab === "artists"}
+          onclick={() => {
+            activeTab = "artists";
+            playUiSfx("confirm");
+          }}>{$t("artistsTab")}</button
         >
         <button
           class="tab-opt"
@@ -694,6 +746,24 @@
                 initialPage={initialAlbumPage}
               />
             {/if}
+          {/if}
+        {:else if activeTab === "artists"}
+          {#if searchOpen && searchQuery && groupedArtists.length === 0}
+            <div class="state-msg">
+              <p class="hint">
+                {$t("noResultsFor")} <strong>{searchQuery}</strong>
+              </p>
+            </div>
+          {:else}
+            <ArtistGrid
+              artists={groupedArtists}
+              onselect={(artist) => {
+                playUiSfx("confirm");
+                selectedArtistFilter = artist.name;
+                activeTab = "library";
+              }}
+              onhover={(artist) => (hoveredArtist = artist)}
+            />
           {/if}
         {:else}
           <PlaylistGrid
@@ -1013,7 +1083,7 @@
   .tab-toggle {
     position: relative;
     display: inline-grid;
-    grid-template-columns: repeat(2, 80px);
+    grid-template-columns: repeat(3, 80px);
     justify-self: start;
     background: linear-gradient(180deg, rgb(38, 38, 42), rgb(54, 58, 68));
     border: 1px solid rgba(212, 219, 240, 0.12);
@@ -1030,7 +1100,7 @@
     top: 2px;
     left: 2px;
     height: calc(100% - 4px);
-    width: calc(50% - 2px);
+    width: 80px;
     background: linear-gradient(180deg, #4a4a4f, #2a2a2f);
     border-radius: 4px;
     border: 1px solid rgba(212, 219, 240, 0.15);
@@ -1041,8 +1111,12 @@
     pointer-events: none;
   }
 
-  .tab-thumb--right {
+  .tab-thumb--artists {
     transform: translateX(100%);
+  }
+
+  .tab-thumb--playlists {
+    transform: translateX(200%);
   }
 
   .tab-opt {

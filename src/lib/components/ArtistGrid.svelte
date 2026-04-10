@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Playlist } from '../stores/playlists';
-  import PlaylistCard from './PlaylistCard.svelte';
+  import type { Artist } from '../types';
+  import ArtistCard from './ArtistCard.svelte';
   import { playUiSfx } from '$lib/ui-sfx';
   import { tick } from 'svelte';
 
@@ -9,13 +9,13 @@
   const PER_PAGE = COLS * ROWS;
 
   let {
-    playlists,
+    artists,
     onselect,
     onhover,
   }: {
-    playlists: Playlist[];
-    onselect: (playlist: Playlist) => void;
-    onhover: (playlist: Playlist | null) => void;
+    artists: Artist[];
+    onselect: (artist: Artist) => void;
+    onhover: (artist: Artist | null) => void;
   } = $props();
 
   let currentPage = $state(0);
@@ -25,14 +25,14 @@
   let prevLength = 0;
   let initialPageSet = false;
 
-  let totalPages = $derived(Math.max(1, Math.ceil(playlists.length / PER_PAGE)));
+  let totalPages = $derived(Math.max(1, Math.ceil(artists.length / PER_PAGE)));
 
-  function pagePlaylists(pageIdx: number): Playlist[] {
-    return playlists.slice(pageIdx * PER_PAGE, (pageIdx + 1) * PER_PAGE);
+  function pageArtists(pageIdx: number): Artist[] {
+    return artists.slice(pageIdx * PER_PAGE, (pageIdx + 1) * PER_PAGE);
   }
 
   $effect(() => {
-    const len = playlists.length;
+    const len = artists.length;
     const tp = totalPages;
 
     if (len === 0) {
@@ -105,8 +105,8 @@
       <!-- Clone of last page -->
       <div class="page">
         <div class="grid">
-          {#each pagePlaylists(totalPages - 1) as playlist (playlist.id + '_lc')}
-            <PlaylistCard {playlist} onclick={() => onselect(playlist)} onhover={(p) => onhover(p)} />
+          {#each pageArtists(totalPages - 1) as artist (artist.name + '_lc')}
+            <ArtistCard {artist} onclick={() => onselect(artist)} onhover={(a) => onhover(a)} />
           {/each}
         </div>
       </div>
@@ -115,11 +115,11 @@
       {#each Array(totalPages) as _, pageIdx}
         <div class="page">
           <div class="grid">
-            {#each pagePlaylists(pageIdx) as playlist (playlist.id)}
-              <PlaylistCard
-                {playlist}
-                onclick={() => onselect(playlist)}
-                onhover={(p) => onhover(p)}
+            {#each pageArtists(pageIdx) as artist (artist.name)}
+              <ArtistCard
+                {artist}
+                onclick={() => onselect(artist)}
+                onhover={(a) => onhover(a)}
               />
             {/each}
           </div>
@@ -129,8 +129,8 @@
       <!-- Clone of first page -->
       <div class="page">
         <div class="grid">
-          {#each pagePlaylists(0) as playlist (playlist.id + '_fc')}
-            <PlaylistCard {playlist} onclick={() => onselect(playlist)} onhover={(p) => onhover(p)} />
+          {#each pageArtists(0) as artist (artist.name + '_fc')}
+            <ArtistCard {artist} onclick={() => onselect(artist)} onhover={(a) => onhover(a)} />
           {/each}
         </div>
       </div>
