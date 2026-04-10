@@ -3,33 +3,51 @@ use souvlaki::{MediaControls, MediaPlayback, MediaPosition, PlatformConfig};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, WPARAM};
+#[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::CreateBitmap;
+#[cfg(target_os = "windows")]
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{
     ITaskbarList3, TaskbarList, THUMBBUTTON, THUMBBUTTONFLAGS,
     THBF_DISABLED, THBF_ENABLED, THB_FLAGS, THB_ICON, THB_TOOLTIP,
 };
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, CreateIconIndirect, ICONINFO,
     RegisterWindowMessageW, SetWindowLongPtrW,
     GWLP_WNDPROC, HICON, WM_COMMAND, WNDPROC,
 };
 
+
 // Windows numeric constants
+#[cfg(target_os = "windows")]
 const THBN_CLICKED: u16 = 0x1800;
+#[cfg(target_os = "windows")]
 const BTN_PREV: u16 = 1;
+#[cfg(target_os = "windows")]
 const BTN_PLAY_PAUSE: u16 = 2;
+#[cfg(target_os = "windows")]
 const BTN_NEXT: u16 = 3;
 
 // Global state for subclassing
+#[cfg(target_os = "windows")]
 static mut ORIGINAL_WNDPROC: Option<WNDPROC> = None;
+#[cfg(target_os = "windows")]
 static mut APP_HANDLE: Option<AppHandle> = None;
+#[cfg(target_os = "windows")]
 static mut TASKBAR_CREATED_MSG: u32 = 0;
+#[cfg(target_os = "windows")]
 static mut THUMBNAIL_HWND: HWND = HWND(std::ptr::null_mut());
+#[cfg(target_os = "windows")]
 static mut ICON_PREV:  HICON = HICON(std::ptr::null_mut());
+#[cfg(target_os = "windows")]
 static mut ICON_PLAY:  HICON = HICON(std::ptr::null_mut());
+#[cfg(target_os = "windows")]
 static mut ICON_PAUSE: HICON = HICON(std::ptr::null_mut());
+#[cfg(target_os = "windows")]
 static mut ICON_NEXT:  HICON = HICON(std::ptr::null_mut());
 
 #[derive(Default, Clone)]
@@ -54,8 +72,12 @@ unsafe impl Sync for MediaControlsManager {}
 
 impl MediaControlsManager {
     pub fn new(app: &AppHandle) -> Self {
+        #[cfg(target_os = "windows")]
         let hwnd_val = get_hwnd_val(app);
+        #[cfg(not(target_os = "windows"))]
+        let hwnd_val = 0;
 
+        #[cfg(target_os = "windows")]
         unsafe {
             APP_HANDLE = Some(app.clone());
             TASKBAR_CREATED_MSG = RegisterWindowMessageW(windows::core::w!("TaskbarButtonCreated"));
@@ -82,13 +104,16 @@ impl MediaControlsManager {
     }
 
     fn init_smtc(&mut self, app: &AppHandle) {
-        let root_hwnd = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::GetAncestor(
+        #[cfg(target_os = "windows")]
+        let raw_hwnd = unsafe {
+            let root_hwnd = windows::Win32::UI::WindowsAndMessaging::GetAncestor(
                 HWND(self.hwnd as *mut _),
                 windows::Win32::UI::WindowsAndMessaging::GA_ROOT,
-            )
+            );
+            Some(root_hwnd.0 as isize as *mut _)
         };
-        let raw_hwnd = Some(root_hwnd.0 as isize as *mut _);
+        #[cfg(not(target_os = "windows"))]
+        let raw_hwnd = None;
 
         let config = PlatformConfig {
             dbus_name: "com.sluic.musicplayer",
@@ -125,6 +150,7 @@ impl MediaControlsManager {
             *play_lock = (is_playing, position_ms);
         }
         self.update_discord();
+        #[cfg(target_os = "windows")]
         unsafe { update_thumbnail_play_state(is_playing) };
 
         if let Some(controls) = self.controls.lock().unwrap().as_mut() {
@@ -215,6 +241,7 @@ impl MediaControlsManager {
 
 // ── Native Helpers ────────────────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 fn get_hwnd_val<R: Runtime>(app: &tauri::AppHandle<R>) -> isize {
     let window = app
         .get_webview_window("main")
@@ -225,6 +252,7 @@ fn get_hwnd_val<R: Runtime>(app: &tauri::AppHandle<R>) -> isize {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn encode_tip(s: &str) -> [u16; 260] {
     let mut buf = [0u16; 260];
     for (i, c) in s.encode_utf16().enumerate().take(259) {
@@ -233,6 +261,7 @@ fn encode_tip(s: &str) -> [u16; 260] {
     buf
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn make_thumb_button(id: u16, hicon: HICON, tip: &str, flags: THUMBBUTTONFLAGS) -> THUMBBUTTON {
     let mut b: THUMBBUTTON = std::mem::zeroed();
     b.dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
@@ -258,10 +287,12 @@ unsafe fn make_thumb_button(id: u16, hicon: HICON, tip: &str, flags: THUMBBUTTON
 // ⏸  PAUSE: two bars (x=4,5 and x=9,10)
 // ▶| NEXT:  right-pointing triangle (x=4..10-d) + bar (x=12,13)
 
+#[cfg(target_os = "windows")]
 fn d_at(y: usize) -> usize {
     if y <= 7 { 7 - y } else { y - 8 }
 }
 
+#[cfg(target_os = "windows")]
 fn prev_pixels(p: &mut Vec<(usize, usize)>) {
     for y in 2..=13usize {
         let d = d_at(y);
@@ -269,17 +300,20 @@ fn prev_pixels(p: &mut Vec<(usize, usize)>) {
         for x in (5 + d)..=11 { p.push((y, x)); } // ◀ triangle
     }
 }
+#[cfg(target_os = "windows")]
 fn play_pixels(p: &mut Vec<(usize, usize)>) {
     for y in 2..=13usize {
         for x in 3..=(9 - d_at(y)) { p.push((y, x)); } // ▶ triangle
     }
 }
+#[cfg(target_os = "windows")]
 fn pause_pixels(p: &mut Vec<(usize, usize)>) {
     for y in 2..=13usize {
         p.push((y, 4)); p.push((y, 5));   // bar 1
         p.push((y, 9)); p.push((y, 10));  // bar 2
     }
 }
+#[cfg(target_os = "windows")]
 fn next_pixels(p: &mut Vec<(usize, usize)>) {
     for y in 2..=13usize {
         let d = d_at(y);
@@ -290,6 +324,7 @@ fn next_pixels(p: &mut Vec<(usize, usize)>) {
 
 /// Build 1bpp color + AND-mask byte arrays.
 /// CreateBitmap (DDB) uses WORD-alignment: 2 bytes per row for a 16-px-wide bitmap.
+#[cfg(target_os = "windows")]
 fn build_icon_bits(pixels: &[(usize, usize)]) -> ([u8; 32], [u8; 32]) {
     let mut color = [0x00_u8; 32];
     let mut mask  = [0xFF_u8; 32]; // all transparent
@@ -302,6 +337,7 @@ fn build_icon_bits(pixels: &[(usize, usize)]) -> ([u8; 32], [u8; 32]) {
     (color, mask)
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn create_monochrome_icon(color: &[u8; 32], mask: &[u8; 32]) -> HICON {
     let hbm_mask  = CreateBitmap(16, 16, 1, 1, Some(mask.as_ptr()  as *const _));
     let hbm_color = CreateBitmap(16, 16, 1, 1, Some(color.as_ptr() as *const _));
@@ -316,6 +352,7 @@ unsafe fn create_monochrome_icon(color: &[u8; 32], mask: &[u8; 32]) -> HICON {
     CreateIconIndirect(&info).unwrap_or(HICON(std::ptr::null_mut()))
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn create_icon(fill: fn(&mut Vec<(usize, usize)>)) -> HICON {
     let mut pixels = Vec::new();
     fill(&mut pixels);
@@ -325,6 +362,7 @@ unsafe fn create_icon(fill: fn(&mut Vec<(usize, usize)>)) -> HICON {
 
 // ── Thumbnail toolbar ─────────────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 unsafe fn init_thumbnail_toolbar(hwnd: HWND) {
     THUMBNAIL_HWND = hwnd;
 
@@ -353,7 +391,7 @@ unsafe fn init_thumbnail_toolbar(hwnd: HWND) {
     }
 }
 
-/// Swap play↔pause icon and dim prev/next while paused.
+#[cfg(target_os = "windows")]
 unsafe fn update_thumbnail_play_state(is_playing: bool) {
     let hwnd = THUMBNAIL_HWND;
     if hwnd.0.is_null() { return; }
@@ -375,6 +413,7 @@ unsafe fn update_thumbnail_play_state(is_playing: bool) {
     let _ = taskbar.ThumbBarUpdateButtons(hwnd, &buttons);
 }
 
+#[cfg(target_os = "windows")]
 unsafe extern "system" fn wndproc_hook(
     hwnd: HWND,
     msg: u32,

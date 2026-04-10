@@ -40,6 +40,35 @@ jobs:
       - name: check types
         run: npm run check
 
+      - name: setup sidecar ffmpeg
+        shell: bash
+        run: |
+          npm install --no-save ffmpeg-static
+          cat << 'EOF' > setup-sidecar.js
+          import fs from 'fs';
+          import { dirname, join } from 'path';
+          import ffmpegRaw from 'ffmpeg-static';
+          const ffmpeg = ffmpegRaw.default || ffmpegRaw;
+          
+          const platform = process.platform;
+          let target = '';
+          if (platform === 'darwin') target = 'aarch64-apple-darwin';
+          else if (platform === 'linux') target = 'x86_64-unknown-linux-gnu';
+          else target = 'x86_64-pc-windows-msvc';
+          
+          const ext = platform === 'win32' ? '.exe' : '';
+          const dest = join('src-tauri', 'binaries', `ffmpeg-${target}${ext}`);
+          
+          fs.mkdirSync(dirname(dest), { recursive: true });
+          if (!fs.existsSync(dest)) {
+            console.log(`Copying FFmpeg to ${dest}`);
+            fs.copyFileSync(ffmpeg, dest);
+          } else {
+            console.log(`FFmpeg sidecar already exists at ${dest}`);
+          }
+          EOF
+          node setup-sidecar.js
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

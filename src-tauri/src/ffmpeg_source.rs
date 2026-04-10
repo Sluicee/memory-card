@@ -33,11 +33,11 @@ impl FFmpegSource {
             "-1",
         ];
 
-        // 1. Try to find the organized production binary in bin/ffmpeg.exe
+        // 1. Try to find the organized production binary in bin/ffmpeg[.exe]
         // 2. Fallback to standard sidecar (for Dev mode or standard installs)
         use tauri::Manager;
         let exe_dir = app.path().executable_dir().ok();
-        let bin_ffmpeg = exe_dir.as_ref().map(|d| d.join("bin").join("ffmpeg.exe"));
+        let bin_ffmpeg = exe_dir.as_ref().map(|d| d.join("bin").join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)));
 
         let mut std_command: Command = if bin_ffmpeg.as_ref().map(|p| p.exists()).unwrap_or(false) {
             let mut cmd = Command::new(bin_ffmpeg.unwrap());
