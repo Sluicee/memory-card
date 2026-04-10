@@ -22,6 +22,7 @@
   import VolumeControl from './VolumeControl.svelte';
   import PS2Btn from './PS2Btn.svelte';
   import { playUiSfx } from '$lib/ui-sfx';
+  import { t } from '$lib/stores/i18n';
 
   let {
     playlist,
@@ -168,11 +169,11 @@
     <div class="panel">
       <div class="playlist-meta">
         <h2 class="playlist-title">{playlist.name}</h2>
-        <p class="playlist-count">{playlist.tracks.length} tracks</p>
+        <p class="playlist-count">{$t('trackCount', playlist.tracks.length)}</p>
       </div>
 
       {#if playlist.tracks.length === 0}
-        <p class="empty-hint">No tracks yet — add them with +</p>
+        <p class="empty-hint">{$t('noTracksYet')}</p>
       {:else}
         <ul class="tracklist">
           {#each playlist.tracks as track (track.id)}
@@ -202,20 +203,20 @@
     <div class="hints-row">
       <button class="hint-btn" onclick={handleClose}>
         <PS2Btn type="circle" />
-        <span>Back</span>
+        <span>{$t('back')}</span>
       </button>
       {#if queueItems.length > 0}
         <button class="hint-btn" onclick={handlePlayPause}>
           <PS2Btn type="cross" />
-          <span class="play-pause-text">{isActivePlaylist && $isPlaying ? 'Pause' : 'Play'}</span>
+          <span class="play-pause-text">{isActivePlaylist && $isPlaying ? $t('pause') : $t('play')}</span>
         </button>
         <button class="hint-btn" onclick={handleShuffle}>
           <PS2Btn type="square" />
-          <span class:active-shuffle={$isShuffled && isActivePlaylist}>Shuffle</span>
+          <span class:active-shuffle={$isShuffled && isActivePlaylist}>{$t('shuffle')}</span>
         </button>
         <button class="hint-btn" onclick={() => { playUiSfx('confirm'); toggleRepeat(); }}>
           <PS2Btn type="triangle" />
-          <span class:active-repeat={$repeatMode !== 'none'} style="display:inline-block;min-width:58px">{$repeatMode === 'one' ? 'Repeat 1' : $repeatMode === 'all' ? 'Repeat All' : 'Repeat'}</span>
+          <span class:active-repeat={$repeatMode !== 'none'} style="display:inline-block;min-width:58px">{$repeatMode === 'one' ? $t('repeatOne') : $repeatMode === 'all' ? $t('repeatAll') : $t('repeat')}</span>
         </button>
 
         <div class="hints-sep"></div>
@@ -223,12 +224,12 @@
         <button class="hint-btn hint-btn--shoulder" onclick={handlePrev} disabled={!$currentTrack}>
           <span class="shoulder-tag">L1</span>
           <span class="nav-icon">&lt;&lt;</span>
-          <span>Prev</span>
+          <span>{$t('prev')}</span>
         </button>
         <button class="hint-btn hint-btn--shoulder" onclick={handleNext} disabled={!$currentTrack}>
           <span class="shoulder-tag">R1</span>
           <span class="nav-icon">&gt;&gt;</span>
-          <span>Next</span>
+          <span>{$t('next')}</span>
         </button>
       {/if}
     </div>

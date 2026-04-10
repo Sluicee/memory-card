@@ -6,6 +6,7 @@
   import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
   import PS2Btn from './PS2Btn.svelte';
   import { playUiSfx, sfxEnabled } from '$lib/ui-sfx';
+  import { t, toggleLocale } from '$lib/stores/i18n';
   import { onMount } from 'svelte';
 
   let { onclose, onStats }: { onclose: () => void; onStats: () => void } = $props();
@@ -84,13 +85,14 @@
   }
 
   const items = $derived([
-    ...($updateInfo ? [{ label: `Get Update (${$updateInfo.version})`, action: getUpdate, highlight: true }] : []),
-    { label: 'Add new folder',  action: addFolder  },
-    { label: 'Refresh library', action: refresh    },
-    { label: 'Statistics',      action: openStats  },
-    { label: `SFX: ${$sfxEnabled ? 'ON' : 'OFF'}`, action: toggleSfx },
-    { label: `Launch at startup: ${autostartEnabled ? 'ON' : 'OFF'}`, action: toggleAutostart },
-    { label: 'Clear library',   action: clear      },
+    ...($updateInfo ? [{ label: $t('getUpdate', $updateInfo.version), action: getUpdate, highlight: true }] : []),
+    { label: $t('addFolder'),                        action: addFolder       },
+    { label: $t('refreshLibrary'),                   action: refresh         },
+    { label: $t('statistics'),                       action: openStats       },
+    { label: $t('sfx', $sfxEnabled),                 action: toggleSfx       },
+    { label: $t('autostart', autostartEnabled),      action: toggleAutostart },
+    { label: $t('clearLibrary'),                     action: clear           },
+    { label: $t('switchLanguage'),                   action: () => { playUiSfx('confirm'); toggleLocale(); } },
   ]);
 
 </script>
@@ -111,7 +113,7 @@
   <div class="close-hint">
     <button class="hint-btn" onclick={() => handleClose()}>
       <PS2Btn type="circle" />
-      <span>Close</span>
+      <span>{$t('close')}</span>
     </button>
   </div>
 </div>

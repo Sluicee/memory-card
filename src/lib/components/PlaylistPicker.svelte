@@ -3,6 +3,7 @@
   import { playlists, addToPlaylist, createPlaylist } from '../stores/playlists';
   import PS2Btn from './PS2Btn.svelte';
   import { playUiSfx } from '$lib/ui-sfx';
+  import { t } from '$lib/stores/i18n';
 
   let {
     track,
@@ -71,7 +72,7 @@
         bind:this={nameInput}
         bind:value={newName}
         class="new-input"
-        placeholder="Playlist name…"
+        placeholder={$t('playlistNamePlaceholder')}
         maxlength="40"
       />
     {:else}
@@ -86,14 +87,14 @@
           {#if addedToId === pl.id}
             ✓ {pl.name}
           {:else if alreadyIn}
-            {pl.name} <span class="already-tag">— added</span>
+            {pl.name} <span class="already-tag">{$t('alreadyAdded')}</span>
           {:else}
             {pl.name}
           {/if}
         </button>
       {/each}
       <button class="menu-item menu-item--new" onclick={() => (creatingNew = true)}>
-        New playlist…
+        {$t('newPlaylist')}
       </button>
     {/if}
   </nav>
@@ -102,16 +103,16 @@
     {#if creatingNew}
       <button class="hint-btn" onclick={() => { creatingNew = false; newName = ''; }}>
         <PS2Btn type="circle" />
-        <span>Back</span>
+        <span>{$t('back')}</span>
       </button>
       <button class="hint-btn hint-btn--create" onclick={handleCreateNew}>
         <PS2Btn type="cross" />
-        <span>Create</span>
+        <span>{$t('create')}</span>
       </button>
     {:else}
       <button class="hint-btn" onclick={handleClose}>
         <PS2Btn type="circle" />
-        <span>Back</span>
+        <span>{$t('back')}</span>
       </button>
     {/if}
   </div>

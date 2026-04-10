@@ -4,6 +4,7 @@
   import { loadStats, clearStats, type StatsMap } from "../stores/stats";
   import type { Album, Track } from "../types";
   import { playUiSfx } from "$lib/ui-sfx";
+  import { t } from "$lib/stores/i18n";
 
   let { albums, onclose }: { albums: Album[]; onclose: () => void } = $props();
 
@@ -161,12 +162,12 @@
     if (!ms) return "—";
     const diff = Date.now() - ms;
     const min = Math.floor(diff / 60000);
-    if (min < 1) return "just now";
-    if (min < 60) return `${min}m ago`;
+    if (min < 1) return $t('justNow');
+    if (min < 60) return $t('minutesAgo', min);
     const h = Math.floor(min / 60);
-    if (h < 24) return `${h}h ago`;
+    if (h < 24) return $t('hoursAgo', h);
     const d = Math.floor(h / 24);
-    if (d < 7) return `${d}d ago`;
+    if (d < 7) return $t('daysAgo', d);
     return new Date(ms).toLocaleDateString();
   }
 
@@ -183,19 +184,19 @@
     <div class="summary">
       <div class="stat-card">
         <span class="stat-val">{stats.totalPlays}</span>
-        <span class="stat-lbl">total plays</span>
+        <span class="stat-lbl">{$t('totalPlays')}</span>
       </div>
       <div class="stat-card">
         <span class="stat-val">{fmtTime(stats.totalListened)}</span>
-        <span class="stat-lbl">total listened</span>
+        <span class="stat-lbl">{$t('totalListened')}</span>
       </div>
       <div class="stat-card">
         <span class="stat-val">{stats.uniqueArtists}</span>
-        <span class="stat-lbl">artists</span>
+        <span class="stat-lbl">{$t('artistsLabel')}</span>
       </div>
       <div class="stat-card">
         <span class="stat-val">{stats.uniqueTracks}</span>
-        <span class="stat-lbl">tracks</span>
+        <span class="stat-lbl">{$t('tracksLabel')}</span>
       </div>
     </div>
 
@@ -204,22 +205,22 @@
       <button
         class="tab"
         class:active={activeTab === "artists"}
-        onclick={() => setActiveTab("artists")}>Artists</button
+        onclick={() => setActiveTab("artists")}>{$t('artistsTab')}</button
       >
       <button
         class="tab"
         class:active={activeTab === "albums"}
-        onclick={() => setActiveTab("albums")}>Albums</button
+        onclick={() => setActiveTab("albums")}>{$t('albumsTab')}</button
       >
       <button
         class="tab"
         class:active={activeTab === "tracks"}
-        onclick={() => setActiveTab("tracks")}>Tracks</button
+        onclick={() => setActiveTab("tracks")}>{$t('tracksTab')}</button
       >
       <button
         class="tab"
         class:active={activeTab === "recent"}
-        onclick={() => setActiveTab("recent")}>Recent</button
+        onclick={() => setActiveTab("recent")}>{$t('recentTab')}</button
       >
     </div>
 
@@ -227,7 +228,7 @@
     <div class="list">
       {#if activeTab === "artists"}
         {#if stats.artistsTop.length === 0}
-          <p class="empty">No plays yet</p>
+          <p class="empty">{$t('noPlaysYet')}</p>
         {:else}
           {#each stats.artistsTop as entry, i (entry.artist)}
             <div class="row">
@@ -243,7 +244,7 @@
               {/if}
               <div class="row-info">
                 <span class="row-title">{entry.artist}</span>
-                <span class="row-sub">last {fmtDate(entry.lastPlayed)}</span>
+                <span class="row-sub">{$t('lastSeen')} {fmtDate(entry.lastPlayed)}</span>
               </div>
               <div class="row-right">
                 <span class="play-count">{entry.playCount}</span>
@@ -254,7 +255,7 @@
         {/if}
       {:else if activeTab === "albums"}
         {#if stats.albumsTop.length === 0}
-          <p class="empty">No plays yet</p>
+          <p class="empty">{$t('noPlaysYet')}</p>
         {:else}
           {#each stats.albumsTop as entry, i (entry.album.id)}
             <div class="row">
@@ -271,7 +272,7 @@
               <div class="row-info">
                 <span class="row-title">{entry.album.title}</span>
                 <span class="row-sub"
-                  >{entry.album.artist} · last {fmtDate(entry.lastPlayed)}</span
+                  >{entry.album.artist} · {$t('lastSeen')} {fmtDate(entry.lastPlayed)}</span
                 >
               </div>
               <div class="row-right">
@@ -283,7 +284,7 @@
         {/if}
       {:else if activeTab === "tracks"}
         {#if stats.tracks.length === 0}
-          <p class="empty">No plays yet</p>
+          <p class="empty">{$t('noPlaysYet')}</p>
         {:else}
           {#each stats.tracks as entry, i (entry.track.id)}
             <div class="row">
@@ -302,7 +303,7 @@
           {/each}
         {/if}
       {:else if stats.recent.length === 0}
-        <p class="empty">No plays yet</p>
+        <p class="empty">{$t('noPlaysYet')}</p>
       {:else}
         {#each stats.recent as entry (entry.track.id)}
           <div class="row">
@@ -334,10 +335,10 @@
     <div class="footer">
       <button class="hint-btn" onclick={handleClose}>
         <PS2Btn type="circle" />
-        <span>Back</span>
+        <span>{$t('back')}</span>
       </button>
       <button class="clear-btn" class:confirming onclick={handleClear}>
-        {confirming ? "Are you sure?" : "Clear stats"}
+        {confirming ? $t('areYouSure') : $t('clearStats')}
       </button>
     </div>
   </div>

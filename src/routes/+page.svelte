@@ -40,6 +40,7 @@
     setVolume,
   } from "$lib/stores/player";
   import { checkForUpdates } from "$lib/stores/updates";
+  import { t } from "$lib/stores/i18n";
   import {
     currentTrack as ct,
     currentAlbum as ca,
@@ -279,7 +280,7 @@
       <div class="header-left">
         <div class="mc-card"></div>
         <div class="memory-block">
-          <span class="memory-label">Memory Card</span>
+          <span class="memory-label">{$t('memoryCard')}</span>
           {#if $librarySize !== "0 MB"}
             <span class="lib-size">{$librarySize}</span>
           {/if}
@@ -293,12 +294,12 @@
             bind:value={searchQuery}
             onkeydown={onSearchKey}
             class="search-input"
-            placeholder="Search…"
+            placeholder={$t('searchPlaceholder')}
             autocomplete="off"
             spellcheck="false"
           />
         {:else if $isScanning}
-          <span class="scanning">Scanning…</span>
+          <span class="scanning">{$t('scanning')}</span>
         {/if}
         {#if activeTab === "library" && hoveredAlbum}
           <span class="hovered-title" class:hovered-title--small={searchOpen}
@@ -322,14 +323,14 @@
         onclick={() => {
           activeTab = "library";
           playUiSfx("back");
-        }}>Library</button>
+        }}>{$t('library')}</button>
       <button
         class="tab-opt"
         class:tab-opt--active={activeTab === "playlists"}
         onclick={() => {
           activeTab = "playlists";
           playUiSfx("confirm");
-        }}>Playlists</button>
+        }}>{$t('playlists')}</button>
     </div>
 
     <!-- Content -->
@@ -340,31 +341,28 @@
             <div class="spinner"></div>
             <p class="scan-info">
               {#if $scanStatus.filesScanned > 0}
-                {$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
+                {$t('scanFiles', $scanStatus.filesScanned, $scanStatus.albumsFound)}
               {:else}
-                Starting scan…
+                {$t('startingScan')}
               {/if}
             </p>
           </div>
         {:else if $albums.length === 0}
           <div class="state-msg">
             <p class="hint">
-              Select <strong>⚙ Options</strong> to choose a music folder
+              {$t('selectHint')} <strong>{$t('optionsWord')}</strong> {$t('selectHintSuffix')}
             </p>
           </div>
         {:else}
           {#if $isScanning}
             <div class="scan-bar">
               <div class="spinner-sm"></div>
-              <span
-                >{$scanStatus.filesScanned} files · {$scanStatus.albumsFound} albums
-                found</span
-              >
+              <span>{$t('scanFilesFound', $scanStatus.filesScanned, $scanStatus.albumsFound)}</span>
             </div>
           {/if}
           {#if searchOpen && searchQuery && filteredAlbums.length === 0}
             <div class="state-msg">
-              <p class="hint">No results for <strong>{searchQuery}</strong></p>
+              <p class="hint">{$t('noResultsFor')} <strong>{searchQuery}</strong></p>
             </div>
           {:else}
             <AlbumGrid
@@ -405,7 +403,7 @@
           >
             <span class="transport-tag">L1</span>
             <span class="transport-icon">&lt;&lt;</span>
-            <span class="transport-text">Prev</span>
+            <span class="transport-text">{$t('prev')}</span>
           </button>
           <button
             class="transport-btn play-btn"
@@ -415,7 +413,7 @@
           >
             <PS2Btn type="start" />
             <span class="transport-text play-pause-text"
-              >{$isPlaying ? "Pause" : "Play"}</span
+              >{$isPlaying ? $t('pause') : $t('play')}</span
             >
           </button>
           <button
@@ -426,7 +424,7 @@
           >
             <span class="transport-tag">R1</span>
             <span class="transport-icon">&gt;&gt;</span>
-            <span class="transport-text">Next</span>
+            <span class="transport-text">{$t('next')}</span>
           </button>
         </div>
         <VolumeControl />
@@ -450,7 +448,7 @@
             </div>
             <div class="now-playing-info">
               <span class="track-name"
-                >{$currentTrack?.title ?? "No track playing"}</span
+                >{$currentTrack?.title ?? $t('noTrackPlaying')}</span
               >
               <span class="track-artist">{$currentTrack?.artist ?? "—"}</span>
             </div>
@@ -471,18 +469,18 @@
         <div class="actions">
           <div class="action-hint">
             <PS2Btn type="cross" />
-            <span class="btn-label">Select</span>
+            <span class="btn-label">{$t('select')}</span>
           </div>
           <button class="action-hint action-btn" onclick={toggleSearch}>
             <PS2Btn type="circle" />
             <span class="btn-label" class:active-search={searchOpen}
-              >Search</span
+              >{$t('search')}</span
             >
           </button>
           <button class="action-hint action-btn" onclick={handleShuffleAll}>
             <PS2Btn type="square" />
             <span class="btn-label" class:active-shuffle={$isShuffled}
-              >Shuffle</span
+              >{$t('shuffle')}</span
             >
           </button>
           <button
@@ -497,10 +495,10 @@
               class="btn-label repeat-label"
               class:active-repeat={$repeatMode !== "none"}
               >{$repeatMode === "one"
-                ? "Repeat 1"
+                ? $t('repeatOne')
                 : $repeatMode === "all"
-                  ? "Repeat All"
-                  : "Repeat"}</span
+                  ? $t('repeatAll')
+                  : $t('repeat')}</span
             >
           </button>
           <button
