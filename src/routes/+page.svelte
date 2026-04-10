@@ -134,6 +134,12 @@
         : $albums,
   );
 
+  const filteredPlaylists = $derived(
+    searchOpen && searchQuery.trim()
+      ? $playlists.filter(p => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+      : $playlists
+  );
+
   function toggleSearch() {
     const opening = !searchOpen;
     searchOpen = opening;
@@ -630,7 +636,7 @@
         </div>
 
         <div class="header-right">
-          {#if searchOpen && (activeTab === "library" || activeTab === "artists")}
+          {#if searchOpen}
             <input
               bind:this={searchInput}
               bind:value={searchQuery}
@@ -766,14 +772,22 @@
             />
           {/if}
         {:else}
-          <PlaylistGrid
-            playlists={$playlists}
-            onselect={(pl) => {
-              playUiSfx("confirm");
-              selectedPlaylist = pl;
-            }}
-            onhover={(pl) => (hoveredPlaylist = pl)}
-          />
+          {#if searchOpen && searchQuery && filteredPlaylists.length === 0}
+            <div class="state-msg">
+              <p class="hint">
+                {$t("noResultsFor")} <strong>{searchQuery}</strong>
+              </p>
+            </div>
+          {:else}
+            <PlaylistGrid
+              playlists={filteredPlaylists}
+              onselect={(pl) => {
+                playUiSfx("confirm");
+                selectedPlaylist = pl;
+              }}
+              onhover={(pl) => (hoveredPlaylist = pl)}
+            />
+          {/if}
         {/if}
       </main>
 
