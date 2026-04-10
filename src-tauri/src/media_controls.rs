@@ -36,6 +36,7 @@ static mut ICON_NEXT:  HICON = HICON(std::ptr::null_mut());
 struct TrackMetadata {
     title: String,
     artist: String,
+    album: String,
     duration_ms: u64,
 }
 
@@ -144,7 +145,7 @@ impl MediaControlsManager {
         &self,
         title: &str,
         artist: &str,
-        // album: &str,
+        album: &str,
         cover_url: Option<&str>,
         duration_ms: u64,
     ) {
@@ -152,6 +153,7 @@ impl MediaControlsManager {
             let mut meta_lock = self.current_metadata.lock().unwrap();
             meta_lock.title = title.to_string();
             meta_lock.artist = artist.to_string();
+            meta_lock.album = album.to_string();
             meta_lock.duration_ms = duration_ms;
         }
         self.update_discord();
@@ -194,6 +196,7 @@ impl MediaControlsManager {
         self.discord.update_presence(
             &meta.title,
             &meta.artist,
+            &meta.album,
             is_playing,
             position_ms,
             meta.duration_ms,

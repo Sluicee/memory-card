@@ -195,9 +195,9 @@ export async function playTrack(track: Track, album: Album, fromShuffle = false)
     if (prevTrack) recordListened(prevTrack.id, get(position));
 
     await invoke('audio_play', { path: track.path, duration: track.duration });
+    currentAlbum.set(album);
     currentTrack.set(track);
     recordPlay(track.id);
-    currentAlbum.set(album);
     duration.set(track.duration);
     position.set(0);
     isPlaying.set(true);
