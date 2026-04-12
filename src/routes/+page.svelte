@@ -258,7 +258,11 @@
           await win.setAlwaysOnTop(false);
           const targetW = 950;
           const targetH = 900;
+          // On Windows, non-resizable windows sometimes ignore setSize when
+          // enlarging. Temporarily enable resizing to guarantee it applies.
+          await win.setResizable(true);
           await win.setSize(new LogicalSize(targetW, targetH));
+          await win.setResizable(false);
           // After resize, clamp position so window stays fully on-screen
           try {
             const monitor = await currentMonitor();
@@ -288,7 +292,9 @@
         case "mini":
           await win.setFullscreen(false);
           await win.setAlwaysOnTop(false);
+          await win.setResizable(true);
           await win.setSize(new LogicalSize(400, 160));
+          await win.setResizable(false);
           break;
       }
     })();
