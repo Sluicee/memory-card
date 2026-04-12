@@ -13,6 +13,7 @@
     isShuffled,
     repeatMode,
     toggleRepeat,
+    addToQueue,
   } from '../stores/player';
   import VolumeControl from './VolumeControl.svelte';
   import SpinningCover from './SpinningCover.svelte';
@@ -214,6 +215,19 @@
                 onclick={(e) => { e.stopPropagation(); pickerTrack = track; }}
                 title="Add to playlist"
               >+</button>
+              <button
+                class="track-queue-btn"
+                onclick={(e) => { e.stopPropagation(); playUiSfx('confirm'); addToQueue(track, album); }}
+                title="Add to queue"
+              >
+                <svg viewBox="0 0 12 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" width="12" height="10">
+                  <line x1="1" y1="2" x2="8" y2="2" />
+                  <line x1="1" y1="5" x2="8" y2="5" />
+                  <line x1="1" y1="8" x2="6" y2="8" />
+                  <line x1="10" y1="6.5" x2="10" y2="9.5" />
+                  <line x1="8.5" y1="8" x2="11.5" y2="8" />
+                </svg>
+              </button>
             </li>
           {/each}
         {/each}
@@ -432,6 +446,26 @@
   }
 
   .track-add-btn:hover { color: var(--track-hover); }
+
+  .track-queue-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-dim);
+    padding: 0 5px 0 1px;
+    line-height: 1;
+    opacity: 0;
+    display: flex;
+    align-items: center;
+    transition: opacity 0.12s, color 0.12s;
+  }
+
+  .track:hover .track-queue-btn {
+    opacity: 1;
+  }
+
+  .track-queue-btn:hover { color: var(--track-hover); }
 
   /* ── Bottom hints ── */
   .hints {

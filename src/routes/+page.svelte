@@ -19,6 +19,7 @@
   import ViewModeBar from "$lib/components/ViewModeBar.svelte";
   import FocusView from "$lib/components/FocusView.svelte";
   import MiniPlayer from "$lib/components/MiniPlayer.svelte";
+  import QueueView from "$lib/components/QueueView.svelte";
   import { viewMode } from "$lib/stores/viewMode";
   import { playUiSfx, primeUiSfx } from "$lib/ui-sfx";
   import { onMount } from "svelte";
@@ -49,6 +50,7 @@
     volume,
     setVolume,
     stepVolume,
+    userQueueItems,
   } from "$lib/stores/player";
   import { checkForUpdates } from "$lib/stores/updates";
   import { t } from "$lib/stores/i18n";
@@ -67,7 +69,7 @@
   import type { Album, Artist } from "$lib/types";
   import type { Playlist } from "$lib/stores/playlists";
 
-  let activeTab = $state<"library" | "artists" | "playlists">("library");
+  let activeTab = $state<"library" | "artists" | "playlists" | "queue">("library");
   let initialAlbumPage = $state(0);
   let hoveredAlbum = $state<Album | null>(null);
   let hoveredArtist = $state<Artist | null>(null);
@@ -241,6 +243,10 @@
         break;
       case "Digit3":
         activeTab = "playlists";
+        playUiSfx("confirm");
+        break;
+      case "Digit4":
+        activeTab = "queue";
         playUiSfx("confirm");
         break;
     }
@@ -675,6 +681,7 @@
           class="tab-thumb"
           class:tab-thumb--artists={activeTab === "artists"}
           class:tab-thumb--playlists={activeTab === "playlists"}
+          class:tab-thumb--queue={activeTab === "queue"}
         ></div>
         <button
           class="tab-opt"
@@ -700,6 +707,19 @@
             playUiSfx("confirm");
           }}>{$t("playlists")}</button
         >
+        <button
+          class="tab-opt tab-opt--queue"
+          class:tab-opt--active={activeTab === "queue"}
+          onclick={() => {
+            activeTab = "queue";
+            playUiSfx("confirm");
+          }}
+        >
+          {$t("queueTab")}
+          {#if $userQueueItems.length > 0}
+            <span class="queue-badge">{$userQueueItems.length}</span>
+          {/if}
+        </button>
       </div>
 
       <!-- Content -->
@@ -774,7 +794,7 @@
               onhover={(artist) => (hoveredArtist = artist)}
             />
           {/if}
-        {:else}
+        {:else if activeTab === "playlists"}
           {#if searchOpen && searchQuery && filteredPlaylists.length === 0}
             <div class="state-msg">
               <p class="hint">
@@ -791,6 +811,8 @@
               onhover={(pl) => (hoveredPlaylist = pl)}
             />
           {/if}
+        {:else}
+          <QueueView />
         {/if}
       </main>
 
@@ -1100,7 +1122,7 @@
   .tab-toggle {
     position: relative;
     display: inline-grid;
-    grid-template-columns: repeat(3, 80px);
+    grid-template-columns: repeat(3, 80px) 72px;
     justify-self: start;
     background: linear-gradient(180deg, rgb(38, 38, 42), rgb(54, 58, 68));
     border: 1px solid rgba(212, 219, 240, 0.12);
@@ -1136,6 +1158,11 @@
     transform: translateX(200%);
   }
 
+  .tab-thumb--queue {
+    transform: translateX(240px);
+    width: 72px;
+  }
+
   .tab-opt {
     position: relative;
     z-index: 1;
@@ -1164,6 +1191,24 @@
   }
   .tab-opt--active {
     color: var(--text-primary);
+  }
+
+  .tab-opt--queue {
+    gap: 4px;
+  }
+
+  .queue-badge {
+    font-size: 8px;
+    letter-spacing: 0;
+    background: var(--track-active);
+    color: #000;
+    border-radius: 999px;
+    padding: 1px 4px;
+    line-height: 1.4;
+    font-weight: 800;
+    text-shadow: none;
+    min-width: 14px;
+    text-align: center;
   }
 
   /* ── Content ── */
