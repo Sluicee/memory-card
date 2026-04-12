@@ -48,6 +48,7 @@
     loadLastTrack,
     volume,
     setVolume,
+    stepVolume,
   } from "$lib/stores/player";
   import { checkForUpdates } from "$lib/stores/updates";
   import { t } from "$lib/stores/i18n";
@@ -163,8 +164,6 @@
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
 
-    const VOL_STEP = 1 / 20;
-
     switch (e.code) {
       case "Space":
         e.preventDefault();
@@ -181,12 +180,12 @@
       case "ArrowUp":
         e.preventDefault();
         playUiSfx("steps");
-        setVolume(Math.min(1, $volume + VOL_STEP));
+        stepVolume(1);
         break;
       case "ArrowDown":
         e.preventDefault();
         playUiSfx("steps");
-        setVolume(Math.max(0, $volume - VOL_STEP));
+        stepVolume(-1);
         break;
       case "KeyS":
         handleShuffleAll();
@@ -336,8 +335,6 @@
     addGamepadListener(handleGamepadAction);
   });
 
-  const VOL_STEP = 1 / 20;
-
   function handleGamepadAction(action: GamepadAction) {
     // Don't handle gamepad when typing
     const tag = document.activeElement?.tagName;
@@ -435,11 +432,11 @@
         break;
       case "l2":
         playUiSfx("steps");
-        setVolume(Math.max(0, $volume - VOL_STEP));
+        stepVolume(-1);
         break;
       case "r2":
         playUiSfx("steps");
-        setVolume(Math.min(1, $volume + VOL_STEP));
+        stepVolume(1);
         break;
       case "start":
         if ($currentTrack) handleTransportPlayPause();
@@ -499,11 +496,11 @@
         break;
       case "l2":
         playUiSfx("steps");
-        setVolume(Math.max(0, $volume - VOL_STEP));
+        stepVolume(-1);
         break;
       case "r2":
         playUiSfx("steps");
-        setVolume(Math.min(1, $volume + VOL_STEP));
+        stepVolume(1);
         break;
       case "start":
         if ($currentTrack) handleTransportPlayPause();
@@ -534,11 +531,11 @@
         break;
       case "l2":
         playUiSfx("steps");
-        setVolume(Math.max(0, $volume - VOL_STEP));
+        stepVolume(-1);
         break;
       case "r2":
         playUiSfx("steps");
-        setVolume(Math.min(1, $volume + VOL_STEP));
+        stepVolume(1);
         break;
       case "start":
         if ($currentTrack) handleTransportPlayPause();

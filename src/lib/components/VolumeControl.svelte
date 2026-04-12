@@ -4,13 +4,24 @@
 
   const STEPS = 20;       // 20 шагов по 5%
   const VISUAL_BARS = 10; // 10 палок, каждая = 2 шага
+  const CURVE = 1.7;      // Экспоненциальная кривая: min ~8x тише, max без изменений
 
-  let level = $derived(Math.round($volume * STEPS));
+  function stepToVolume(n: number): number {
+    if (n === 0) return 0;
+    return Math.pow(n / STEPS, CURVE);
+  }
+
+  function volumeToStep(v: number): number {
+    if (v <= 0) return 0;
+    return Math.round(Math.pow(v, 1 / CURVE) * STEPS);
+  }
+
+  let level = $derived(volumeToStep($volume));
 
   function setLevel(n: number) {
     if (n === level) return;
     playUiSfx('steps');
-    setVolume(n / STEPS);
+    setVolume(stepToVolume(n));
   }
 
   function stepLevel(delta: number) {

@@ -260,6 +260,17 @@ export async function setVolume(v: number) {
   await invoke('audio_set_volume', { volume: v });
 }
 
+const VOL_STEPS = 20;
+const VOL_CURVE = 1.7;
+
+export async function stepVolume(delta: number) {
+  const v = get(volume);
+  const currentStep = v <= 0 ? 0 : Math.round(Math.pow(v, 1 / VOL_CURVE) * VOL_STEPS);
+  const nextStep = Math.max(0, Math.min(VOL_STEPS, currentStep + delta));
+  const nextVol = nextStep === 0 ? 0 : Math.pow(nextStep / VOL_STEPS, VOL_CURVE);
+  await setVolume(nextVol);
+}
+
 export async function seekTo(nextPosition: number) {
   const track = get(currentTrack);
   if (!track) return;
