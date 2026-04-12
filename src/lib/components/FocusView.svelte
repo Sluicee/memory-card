@@ -19,6 +19,7 @@
   import { albums } from "$lib/stores/library";
   import { playUiSfx } from "$lib/ui-sfx";
   import { t } from "$lib/stores/i18n";
+  import VolumeControl from "./VolumeControl.svelte";
 
   let bgColor = $state("rgb(14, 16, 28)");
 
@@ -155,60 +156,66 @@
   </div>
 
   <div class="controls" class:controls--visible={controlsVisible}>
-    <button
-      class="ctrl-btn ctrl-btn--secondary"
-      class:active={$isShuffled}
-      onclick={handleToggleShuffle}
-      disabled={!$currentTrack}
-      title="Shuffle"
-    >
-      <PS2Btn type="square" />
-      <span class="ctrl-label">{$t("shuffle")}</span>
-    </button>
-
-    <button
-      class="ctrl-btn ctrl-btn--shoulder"
-      onclick={handlePrev}
-      disabled={!$currentTrack}
-    >
-      <span class="shoulder-tag">L1</span>
-      <span class="ctrl-icon">&lt;&lt;</span>
-    </button>
-
-    <button
-      class="ctrl-btn ctrl-btn--play"
-      onclick={handlePlayPause}
-      disabled={!$currentTrack}
-    >
-      <PS2Btn type="start" />
-      <span class="ctrl-label">{$isPlaying ? "Pause" : "Play"}</span>
-    </button>
-
-    <button
-      class="ctrl-btn ctrl-btn--shoulder"
-      onclick={handleNext}
-      disabled={!$currentTrack}
-    >
-      <span class="shoulder-tag">R1</span>
-      <span class="ctrl-icon">&gt;&gt;</span>
-    </button>
-
-    <button
-      class="ctrl-btn ctrl-btn--secondary"
-      class:active={$repeatMode !== "none"}
-      onclick={handleToggleRepeat}
-      disabled={!$currentTrack}
-      title="Repeat"
-    >
-      <PS2Btn type="triangle" />
-      <span class="ctrl-label"
-        >{$repeatMode === "one"
-          ? $t("repeatOne")
-          : $repeatMode === "all"
-            ? $t("repeatAll")
-            : $t("repeat")}</span
+    <div class="controls-transport">
+      <button
+        class="ctrl-btn ctrl-btn--secondary"
+        class:active={$isShuffled}
+        onclick={handleToggleShuffle}
+        disabled={!$currentTrack}
+        title="Shuffle"
       >
-    </button>
+        <PS2Btn type="square" />
+        <span class="ctrl-label">{$t("shuffle")}</span>
+      </button>
+
+      <button
+        class="ctrl-btn ctrl-btn--shoulder"
+        onclick={handlePrev}
+        disabled={!$currentTrack}
+      >
+        <span class="shoulder-tag">L1</span>
+        <span class="ctrl-icon">&lt;&lt;</span>
+      </button>
+
+      <button
+        class="ctrl-btn ctrl-btn--play"
+        onclick={handlePlayPause}
+        disabled={!$currentTrack}
+      >
+        <PS2Btn type="start" />
+        <span class="ctrl-label">{$isPlaying ? "Pause" : "Play"}</span>
+      </button>
+
+      <button
+        class="ctrl-btn ctrl-btn--shoulder"
+        onclick={handleNext}
+        disabled={!$currentTrack}
+      >
+        <span class="shoulder-tag">R1</span>
+        <span class="ctrl-icon">&gt;&gt;</span>
+      </button>
+
+      <button
+        class="ctrl-btn ctrl-btn--secondary"
+        class:active={$repeatMode !== "none"}
+        onclick={handleToggleRepeat}
+        disabled={!$currentTrack}
+        title="Repeat"
+      >
+        <PS2Btn type="triangle" />
+        <span class="ctrl-label"
+          >{$repeatMode === "one"
+            ? $t("repeatOne")
+            : $repeatMode === "all"
+              ? $t("repeatAll")
+              : $t("repeat")}</span
+        >
+      </button>
+    </div>
+
+    <div class="controls-volume">
+      <VolumeControl />
+    </div>
   </div>
 </div>
 
@@ -298,14 +305,26 @@
 
   .controls {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     opacity: 0;
     transform: translateY(6px);
     transition:
       opacity 0.22s ease,
       transform 0.22s ease;
     pointer-events: none;
+  }
+
+  .controls-transport {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .controls-volume {
+    display: flex;
+    justify-content: center;
   }
 
   .controls--visible {

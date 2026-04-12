@@ -1,6 +1,7 @@
 <script lang="ts">
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import ProgressBar from './ProgressBar.svelte';
   import {
     currentTrack,
     currentAlbum,
@@ -13,8 +14,8 @@
     resume,
     playNext,
     playPrev,
-    position,
-    duration,
+    volume,
+    setVolume,
   } from '$lib/stores/player';
   import { albums } from '$lib/stores/library';
   import { playUiSfx } from '$lib/ui-sfx';
@@ -23,10 +24,6 @@
 
   const coverSrc = $derived(
     $currentAlbum?.cover_art ? convertFileSrc($currentAlbum.cover_art) : null
-  );
-
-  const progressPct = $derived(
-    $duration > 0 ? Math.min(100, ($position / $duration) * 100) : 0
   );
 
   let bgColor = $state('rgb(14, 16, 28)');
@@ -96,10 +93,37 @@
     playUiSfx('confirm');
     await playShuffledAll($albums);
   }
+
+  // Compact volume — same curve as VolumeControl
+  const VOL_STEPS = 20;
+  const VOL_CURVE = 1.7;
+  const VOL_BARS  = 5;
+
+  function stepToVol(n: number): number {
+    if (n === 0) return 0;
+    return Math.pow(n / VOL_STEPS, VOL_CURVE);
+  }
+
+  function volToStep(v: number): number {
+    if (v <= 0) return 0;
+    return Math.round(Math.pow(v, 1 / VOL_CURVE) * VOL_STEPS);
+  }
+
+  let volLevel = $derived(volToStep($volume));
+
+  function setVolLevel(n: number) {
+    setVolume(stepToVol(Math.max(0, Math.min(VOL_STEPS, n))));
+  }
+
+  function onVolWheel(e: WheelEvent) {
+    e.preventDefault();
+    setVolLevel(volLevel + (e.deltaY < 0 ? 1 : -1));
+  }
 </script>
 
 <div class="mini-root" style="background: {bgColor}">
-  <!-- Top row: art + info -->
+
+  <!-- ── Top: art + info column (title / artist / seek bar) ── -->
   <div class="mini-top" data-tauri-drag-region>
     <div class="mini-art">
       {#if coverSrc}
@@ -109,15 +133,24 @@
       {/if}
     </div>
 
-    <div class="mini-info" data-tauri-drag-region>
-      <span class="mini-track">{$currentTrack?.title ?? '—'}</span>
-      <span class="mini-artist">{$currentTrack?.artist ?? ''}</span>
+    <div class="mini-info-col">
+      <div class="mini-meta" data-tauri-drag-region>
+        <span class="mini-track">{$currentTrack?.title ?? '—'}</span>
+        <span class="mini-artist">{$currentTrack?.artist ?? ''}</span>
+      </div>
+      <div class="mini-seek">
+        <ProgressBar />
+      </div>
     </div>
   </div>
 
-  <!-- Bottom row: controls -->
+  <!-- ── Bottom: transport controls + volume + pin ── -->
   <div class="mini-bottom">
+
+    <!-- Transport -->
     <div class="mini-controls">
+
+      <!-- Shuffle -->
       <button
         class="mini-btn"
         class:active={$isShuffled}
@@ -125,23 +158,28 @@
         disabled={!$currentTrack}
         title="Shuffle"
       >
-        <svg viewBox="0 0 10 10" fill="currentColor">
-          <path d="M1,3 L3,3 L5,6 L7,6 L9,6 M1,7 L3,7 L5,4 L7,4 L9,4" stroke="currentColor" fill="none" stroke-width="1.2"/>
+        <svg viewBox="0 0 10 10">
+          <path d="M1,3.5 H3.5 L7,6.5 H9.5" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <polyline points="8,5.5 9.5,6.5 8,7.5" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M1,6.5 H3.5 L7,3.5 H9.5" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <polyline points="8,2.5 9.5,3.5 8,4.5" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
 
+      <!-- Prev -->
       <button class="mini-btn" onclick={handlePrev} disabled={!$currentTrack} title="Previous">
         <svg viewBox="0 0 10 10" fill="currentColor">
-          <polygon points="9,1 4,5 9,9"/>
-          <rect x="1" y="1" width="2" height="8"/>
+          <rect x="1" y="1.5" width="1.5" height="7" rx="0.5"/>
+          <polygon points="3.5,5 9,1.5 9,8.5"/>
         </svg>
       </button>
 
+      <!-- Play / Pause -->
       <button class="mini-btn mini-btn--play" onclick={handlePlayPause} disabled={!$currentTrack}>
         {#if $isPlaying}
           <svg viewBox="0 0 10 10" fill="currentColor">
-            <rect x="1.5" y="1" width="3" height="8"/>
-            <rect x="5.5" y="1" width="3" height="8"/>
+            <rect x="1.5" y="1" width="2.5" height="8" rx="0.5"/>
+            <rect x="5.5" y="1" width="2.5" height="8" rx="0.5"/>
           </svg>
         {:else}
           <svg viewBox="0 0 10 10" fill="currentColor">
@@ -150,13 +188,15 @@
         {/if}
       </button>
 
+      <!-- Next -->
       <button class="mini-btn" onclick={handleNext} disabled={!$currentTrack} title="Next">
         <svg viewBox="0 0 10 10" fill="currentColor">
-          <polygon points="1,1 6,5 1,9"/>
-          <rect x="7" y="1" width="2" height="8"/>
+          <polygon points="1,1.5 6.5,5 1,8.5"/>
+          <rect x="7.5" y="1.5" width="1.5" height="7" rx="0.5"/>
         </svg>
       </button>
 
+      <!-- Repeat -->
       <button
         class="mini-btn"
         class:active={$repeatMode !== 'none'}
@@ -164,26 +204,44 @@
         disabled={!$currentTrack}
         title="Repeat"
       >
-        <svg viewBox="0 0 10 10" fill="currentColor">
-          <path d="M2,4 L8,4 L8,7 L2,7 Z M8,4 L9,3 L9,5 Z" fill="none" stroke="currentColor" stroke-width="1"/>
+        <svg viewBox="0 0 10 10">
+          <path d="M2,3 H7.5" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round"/>
+          <polyline points="6.5,1.8 7.5,3 6.5,4.2" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8,7 H2.5" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round"/>
+          <polyline points="3.5,5.8 2.5,7 3.5,8.2" stroke="currentColor" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
           {#if $repeatMode === 'one'}
-            <text x="5" y="6.5" font-size="4" text-anchor="middle" fill="currentColor" stroke="none">1</text>
+            <text x="5" y="5.8" font-size="3.5" text-anchor="middle" fill="currentColor" stroke="none">1</text>
           {/if}
         </svg>
       </button>
     </div>
 
-    <!-- Pin toggle -->
+    <!-- Compact volume (wheel + click on bars) -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="mini-vol" onwheel={onVolWheel}>
+      <span class="mini-vol-label">VOL</span>
+      <div class="mini-vol-bars">
+        {#each Array(VOL_BARS) as _, i}
+          {@const barFull = (i + 1) * 4}
+          {@const barHalfMin = i * 4 + 1}
+          <button
+            class="mini-vol-bar"
+            class:filled={volLevel >= barFull}
+            class:half={volLevel >= barHalfMin && volLevel < barFull}
+            onclick={() => setVolLevel(barFull)}
+            style="height: {5 + i * 2.8}px"
+            aria-label="Volume bar {i + 1}"
+          ></button>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Pin / always-on-top -->
     <button class="mini-pin-btn" class:pinned onclick={togglePin} title={pinned ? 'Unpin' : 'Pin on top'}>
       <svg viewBox="0 0 10 10" fill="currentColor">
         <path d="M5,0.5 L7.5,3 L6.5,4 L8.5,7 L6,7 L6,9.5 L4,9.5 L4,7 L1.5,7 L3.5,4 L2.5,3 Z"/>
       </svg>
     </button>
-  </div>
-
-  <!-- Progress bar -->
-  <div class="mini-progress-track">
-    <div class="mini-progress-fill" style="width: {progressPct}%"></div>
   </div>
 </div>
 
@@ -196,23 +254,14 @@
     transition: background 0.4s ease;
   }
 
-  /* Top row: art + track info */
+  /* ── Top section ── */
   .mini-top {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 8px 4px;
+    gap: 10px;
+    padding: 8px 10px 4px;
     min-height: 0;
-  }
-
-  /* Bottom row: controls */
-  .mini-bottom {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 6px 4px;
-    gap: 4px;
   }
 
   .mini-art {
@@ -239,12 +288,18 @@
     color: rgba(90, 95, 120, 0.5);
   }
 
-  .mini-info {
+  .mini-info-col {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 5px;
+  }
+
+  .mini-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .mini-track {
@@ -261,15 +316,38 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-weight: 400;
-    text-shadow: none;
+  }
+
+  /* Seek bar — make it fill the available column width */
+  .mini-seek :global(.progress-wrap) {
+    width: 100%;
+    gap: 4px;
+  }
+
+  .mini-seek :global(.bar) {
+    flex: 1;
+    width: auto !important;
+    min-width: 0;
+  }
+
+  .mini-seek :global(.time) {
+    font-size: 9px;
+    min-width: 24px;
+  }
+
+  /* ── Bottom section ── */
+  .mini-bottom {
+    display: flex;
+    align-items: center;
+    padding: 0 8px 6px;
+    gap: 4px;
   }
 
   .mini-controls {
     display: flex;
     align-items: center;
     gap: 1px;
-    flex-shrink: 0;
+    margin-right: auto;
   }
 
   .mini-btn {
@@ -286,8 +364,8 @@
   }
 
   .mini-btn svg {
-    width: 12px;
-    height: 12px;
+    width: 13px;
+    height: 13px;
     display: block;
   }
 
@@ -311,10 +389,56 @@
   }
 
   .mini-btn--play svg {
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
   }
 
+  /* ── Compact volume ── */
+  .mini-vol {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 5px;
+    cursor: default;
+    flex-shrink: 0;
+  }
+
+  .mini-vol-label {
+    font-size: 8px;
+    font-weight: 800;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+  }
+
+  .mini-vol-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+  }
+
+  .mini-vol-bar {
+    width: 4px;
+    background: var(--text-dim);
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0.25;
+    transition: opacity 0.1s, background 0.1s;
+    border-radius: 1px;
+  }
+
+  .mini-vol-bar.filled {
+    opacity: 1;
+    background: linear-gradient(180deg, #7fd0ff, #3b79ff);
+    box-shadow: 0 0 4px rgba(86, 143, 255, 0.25);
+  }
+
+  .mini-vol-bar.half {
+    opacity: 0.45;
+    background: linear-gradient(180deg, #7fd0ff, #3b79ff);
+  }
+
+  /* ── Pin button ── */
   .mini-pin-btn {
     background: none;
     border: none;
@@ -341,18 +465,5 @@
 
   .mini-pin-btn.pinned {
     color: var(--track-active);
-  }
-
-  .mini-progress-track {
-    width: 100%;
-    height: 3px;
-    background: rgba(255, 255, 255, 0.08);
-    flex-shrink: 0;
-  }
-
-  .mini-progress-fill {
-    height: 100%;
-    background: var(--track-active);
-    transition: width 0.5s linear;
   }
 </style>
