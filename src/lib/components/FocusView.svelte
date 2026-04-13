@@ -1,5 +1,15 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
+  import { fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+
+  function scaleIn(node: Element, { duration = 320 }: { duration?: number } = {}) {
+    return {
+      duration,
+      easing: cubicOut,
+      css: (t: number) => `opacity: ${t}; transform: scale(${0.96 + 0.04 * t});`,
+    };
+  }
   import SpinningCover from "./SpinningCover.svelte";
   import ProgressBar from "./ProgressBar.svelte";
   import PS2Btn from "./PS2Btn.svelte";
@@ -127,28 +137,38 @@
   bind:this={rootEl}
   onmousemove={onMouseMove}
 >
-  <div class="disc-wrap">
-    {#if coverSrc}
-      <SpinningCover
-        src={coverSrc}
-        alt={$currentAlbum?.title ?? ""}
-        size={260}
-      />
-    {:else}
-      <div class="disc-placeholder">♪</div>
-    {/if}
-  </div>
-
-  <div class="track-meta">
-    <span class="track-name">{$currentTrack?.title ?? "—"}</span>
-    <span class="track-artist">{$currentTrack?.artist ?? ""}</span>
-    {#if $currentAlbum}
-      <span class="track-album"
-        >{$currentAlbum.title}{$currentAlbum.year
-          ? ` · ${$currentAlbum.year}`
-          : ""}</span
+  <div class="cover-meta-slot">
+    {#key $currentTrack?.path}
+      <div
+        class="cover-meta"
+        in:scaleIn={{ duration: 320 }}
+        out:fade={{ duration: 160 }}
       >
-    {/if}
+        <div class="disc-wrap">
+          {#if coverSrc}
+            <SpinningCover
+              src={coverSrc}
+              alt={$currentAlbum?.title ?? ""}
+              size={260}
+            />
+          {:else}
+            <div class="disc-placeholder">♪</div>
+          {/if}
+        </div>
+
+        <div class="track-meta">
+          <span class="track-name">{$currentTrack?.title ?? "—"}</span>
+          <span class="track-artist">{$currentTrack?.artist ?? ""}</span>
+          {#if $currentAlbum}
+            <span class="track-album"
+              >{$currentAlbum.title}{$currentAlbum.year
+                ? ` · ${$currentAlbum.year}`
+                : ""}</span
+            >
+          {/if}
+        </div>
+      </div>
+    {/key}
   </div>
 
   <div class="progress-area">
@@ -239,6 +259,26 @@
     to {
       opacity: 1;
     }
+  }
+
+  .cover-meta-slot {
+    display: grid;
+    place-items: center start;
+    width: 100%;
+    min-height: 340px;
+  }
+
+  /* Both outgoing and incoming sit in the same grid cell — no layout shift */
+  .cover-meta-slot > :global(*) {
+    grid-area: 1 / 1;
+  }
+
+  .cover-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
   }
 
   .disc-wrap {
