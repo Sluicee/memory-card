@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { Album } from '../types';
-  import AlbumCard from './AlbumCard.svelte';
-  import { playUiSfx } from '$lib/ui-sfx';
-  import { tick } from 'svelte';
+  import type { Album } from "../types";
+  import AlbumCard from "./AlbumCard.svelte";
+  import { playUiSfx } from "$lib/ui-sfx";
+  import { tick } from "svelte";
 
   const COLS = 4;
   const ROWS = 3;
@@ -21,9 +21,9 @@
   } = $props();
 
   // virtualIndex layout: [last-clone=0] [page0=1] [page1=2] ... [pageN=N] [first-clone=N+1]
-  let currentPage   = $state(0);   // logical page (0..totalPages-1)
-  let virtualIndex  = $state(1);   // DOM index in the slider
-  let noTransition  = $state(false);
+  let currentPage = $state(0); // logical page (0..totalPages-1)
+  let virtualIndex = $state(1); // DOM index in the slider
+  let noTransition = $state(false);
   let scrollCooldown = false;
   let prevLength = 0;
   let initialPageSet = false;
@@ -67,11 +67,13 @@
     currentPage = newPage;
     await tick();
     // Brief delay so browser applies no-transition before we re-enable
-    setTimeout(() => { noTransition = false; }, 20);
+    setTimeout(() => {
+      noTransition = false;
+    }, 20);
   }
 
   function nextPage() {
-    playUiSfx('nextPrev');
+    playUiSfx("nextPrev");
     const next = virtualIndex + 1;
     virtualIndex = next;
     if (next > totalPages) {
@@ -84,7 +86,7 @@
   }
 
   function prevPage() {
-    playUiSfx('nextPrev');
+    playUiSfx("nextPrev");
     const prev = virtualIndex - 1;
     virtualIndex = prev;
     if (prev < 1) {
@@ -109,13 +111,15 @@
   // ── Gamepad API ──────────────────────────────────────────────────
 
   // Returns true if navigation hit a boundary and couldn't move
-  export function gamepadNavigate(dir: 'left' | 'right' | 'up' | 'down'): boolean {
+  export function gamepadNavigate(
+    dir: "left" | "right" | "up" | "down",
+  ): boolean {
     let pageItems = pageAlbums(currentPage);
     if (pageItems.length === 0) return false;
 
     if (gpCursor < 0) {
       // First gamepad interaction — show cursor at entry position
-      gpCursor = (dir === 'left' || dir === 'up') ? pageItems.length - 1 : 0;
+      gpCursor = dir === "left" || dir === "up" ? pageItems.length - 1 : 0;
       onhover(pageItems[gpCursor]);
       return false;
     }
@@ -124,7 +128,7 @@
     const row = Math.floor(gpCursor / COLS);
 
     switch (dir) {
-      case 'right': {
+      case "right": {
         if (col < COLS - 1 && gpCursor + 1 < pageItems.length) {
           gpCursor = gpCursor + 1;
         } else {
@@ -135,7 +139,7 @@
         }
         break;
       }
-      case 'left': {
+      case "left": {
         if (col > 0) {
           gpCursor = gpCursor - 1;
         } else {
@@ -147,7 +151,7 @@
         }
         break;
       }
-      case 'down': {
+      case "down": {
         const next = (row + 1) * COLS + col;
         if (next < pageItems.length) {
           gpCursor = next;
@@ -157,7 +161,7 @@
         }
         break;
       }
-      case 'up': {
+      case "up": {
         if (row > 0) {
           gpCursor = (row - 1) * COLS + col;
         } else {
@@ -194,8 +198,15 @@
       <!-- Clone of last page (enables wrapping leftward) -->
       <div class="page">
         <div class="grid">
-          {#each pageAlbums(totalPages - 1) as album (album.id + '_lc')}
-            <AlbumCard {album} onclick={() => onselect(album)} onhover={(a) => { gpCursor = -1; onhover(a); }} />
+          {#each pageAlbums(totalPages - 1) as album (album.id + "_lc")}
+            <AlbumCard
+              {album}
+              onclick={() => onselect(album)}
+              onhover={(a) => {
+                gpCursor = -1;
+                onhover(a);
+              }}
+            />
           {/each}
         </div>
       </div>
@@ -209,7 +220,10 @@
                 {album}
                 focused={pageIdx === currentPage && i === gpCursor}
                 onclick={() => onselect(album)}
-                onhover={(a) => { gpCursor = -1; onhover(a); }}
+                onhover={(a) => {
+                  gpCursor = -1;
+                  onhover(a);
+                }}
               />
             {/each}
           </div>
@@ -219,27 +233,17 @@
       <!-- Clone of first page (enables wrapping rightward) -->
       <div class="page">
         <div class="grid">
-          {#each pageAlbums(0) as album (album.id + '_fc')}
-            <AlbumCard {album} onclick={() => onselect(album)} onhover={(a) => { gpCursor = -1; onhover(a); }} />
-          {/each}
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+          {#each pageAlbums(0) as album (album.id + "_fc")}
+            <AlbumCard
+              {album}
+              onclick={() => onselect(album)}
+              onhover={(a) => {
+                gpCursor = -1;
+                onhover(a);
+              }}
+            />
 
-<style>
-  .wrapper {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .stage {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
+hidden;
     display: flex;
     align-items: center;
     justify-content: center;

@@ -71,7 +71,9 @@
   import type { Album, Artist } from "$lib/types";
   import type { Playlist } from "$lib/stores/playlists";
 
-  let activeTab = $state<"library" | "artists" | "playlists" | "queue">("library");
+  let activeTab = $state<"library" | "artists" | "playlists" | "queue">(
+    "library",
+  );
   let initialAlbumPage = $state(0);
   let hoveredAlbum = $state<Album | null>(null);
   let hoveredArtist = $state<Artist | null>(null);
@@ -102,20 +104,23 @@
 
   const groupedArtists = $derived(
     Object.values(
-      $albums.reduce((acc, album) => {
-        const artistName = album.artist || 'Unknown Artist';
-        if (!acc[artistName]) {
-          acc[artistName] = { name: artistName, albums: [] };
-        }
-        acc[artistName].albums.push(album);
-        return acc;
-      }, {} as Record<string, Artist>)
+      $albums.reduce(
+        (acc, album) => {
+          const artistName = album.artist || "Unknown Artist";
+          if (!acc[artistName]) {
+            acc[artistName] = { name: artistName, albums: [] };
+          }
+          acc[artistName].albums.push(album);
+          return acc;
+        },
+        {} as Record<string, Artist>,
+      ),
     )
-    .filter(a => {
-      if (!searchOpen || !searchQuery.trim()) return true;
-      return a.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
-    })
-    .sort((a, b) => a.name.localeCompare(b.name))
+      .filter((a) => {
+        if (!searchOpen || !searchQuery.trim()) return true;
+        return a.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
+      })
+      .sort((a, b) => a.name.localeCompare(b.name)),
   );
 
   const filteredAlbums = $derived(
@@ -136,14 +141,16 @@
           );
         })()
       : selectedArtistFilter
-        ? $albums.filter(a => a.artist === selectedArtistFilter)
+        ? $albums.filter((a) => a.artist === selectedArtistFilter)
         : $albums,
   );
 
   const filteredPlaylists = $derived(
     searchOpen && searchQuery.trim()
-      ? $playlists.filter(p => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
-      : $playlists
+      ? $playlists.filter((p) =>
+          p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+        )
+      : $playlists,
   );
 
   function toggleSearch() {
@@ -238,6 +245,7 @@
         break;
       case "Digit1":
         activeTab = "library";
+        selectedArtistFilter = null;
         playUiSfx("back");
         break;
       case "Digit2":
@@ -285,13 +293,21 @@
               const pos = await win.outerPosition();
               const curX = pos.x / sf;
               const curY = pos.y / sf;
-              const clampedX = Math.max(monX, Math.min(curX, monX + monW - targetW));
-              const clampedY = Math.max(monY, Math.min(curY, monY + monH - targetH));
+              const clampedX = Math.max(
+                monX,
+                Math.min(curX, monX + monW - targetW),
+              );
+              const clampedY = Math.max(
+                monY,
+                Math.min(curY, monY + monH - targetH),
+              );
               if (clampedX !== curX || clampedY !== curY) {
                 await win.setPosition(new LogicalPosition(clampedX, clampedY));
               }
             }
-          } catch { /* ignore position errors */ }
+          } catch {
+            /* ignore position errors */
+          }
           break;
         }
         case "fullscreen":
@@ -363,15 +379,30 @@
         // If individual audio files are dropped, use the parent directory so the
         // whole album folder is scanned. Deduplicate in case multiple files from
         // the same folder are dropped at once.
-        const AUDIO_EXTS = new Set(["mp3","flac","ogg","m4a","aac","wav","opus"]);
-        const resolved = [...new Set(rawPaths.map((p) => {
-          const ext = p.split(".").pop()?.toLowerCase() ?? "";
-          if (AUDIO_EXTS.has(ext)) {
-            const lastSep = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-            return lastSep >= 0 ? p.slice(0, lastSep) : p;
-          }
-          return p;
-        }))];
+        const AUDIO_EXTS = new Set([
+          "mp3",
+          "flac",
+          "ogg",
+          "m4a",
+          "aac",
+          "wav",
+          "opus",
+        ]);
+        const resolved = [
+          ...new Set(
+            rawPaths.map((p) => {
+              const ext = p.split(".").pop()?.toLowerCase() ?? "";
+              if (AUDIO_EXTS.has(ext)) {
+                const lastSep = Math.max(
+                  p.lastIndexOf("/"),
+                  p.lastIndexOf("\\"),
+                );
+                return lastSep >= 0 ? p.slice(0, lastSep) : p;
+              }
+              return p;
+            }),
+          ),
+        ];
         // scanFolder serialises internally via a lock, but we still await to
         // avoid the async IIFE being garbage-collected early.
         (async () => {
@@ -490,7 +521,12 @@
         if ($currentTrack) handleTransportPlayPause();
         break;
       case "select":
-        activeTab = activeTab === "library" ? "artists" : activeTab === "artists" ? "playlists" : "library";
+        activeTab =
+          activeTab === "library"
+            ? "artists"
+            : activeTab === "artists"
+              ? "playlists"
+              : "library";
         playUiSfx("confirm");
         albumGrid?.gamepadClearCursor();
         gpNowPlayingFocused = false;
@@ -704,7 +740,8 @@
             <div class="scan-status">
               <span class="scan-status-text">
                 {#if $scanStatus.totalFiles > 0}
-                  {$scanStatus.filesScanned.toLocaleString()} / {$scanStatus.totalFiles.toLocaleString()} · {$scanStatus.albumsFound} albums
+                  {$scanStatus.filesScanned.toLocaleString()} / {$scanStatus.totalFiles.toLocaleString()}
+                  · {$scanStatus.albumsFound} albums
                 {:else}
                   {$t("scanning")}
                 {/if}
@@ -712,7 +749,12 @@
               <div class="scan-status-bar">
                 <div
                   class="scan-status-fill"
-                  style="width: {$scanStatus.totalFiles > 0 ? Math.round($scanStatus.filesScanned / $scanStatus.totalFiles * 100) : 0}%"
+                  style="width: {$scanStatus.totalFiles > 0
+                    ? Math.round(
+                        ($scanStatus.filesScanned / $scanStatus.totalFiles) *
+                          100,
+                      )
+                    : 0}%"
                 ></div>
               </div>
             </div>
@@ -722,9 +764,19 @@
               >{hoveredAlbum.title}</span
             >
           {:else if selectedArtistFilter && activeTab === "library"}
-            <span class="hovered-title" style="display:flex; align-items:center; gap: 8px;">
+            <span
+              class="hovered-title"
+              style="display:flex; align-items:center; gap: 8px;"
+            >
               {selectedArtistFilter}
-              <button class="action-btn" onclick={() => { playUiSfx("back"); selectedArtistFilter = null; }} style="font-size: 20px; color: var(--text-dim)">&times;</button>
+              <button
+                class="action-btn"
+                onclick={() => {
+                  playUiSfx("back");
+                  selectedArtistFilter = null;
+                }}
+                style="font-size: 20px; color: var(--text-dim)">&times;</button
+              >
             </span>
           {:else if activeTab === "artists" && hoveredArtist}
             <span class="hovered-title">{hoveredArtist.name}</span>
@@ -747,6 +799,7 @@
           class:tab-opt--active={activeTab === "library"}
           onclick={() => {
             activeTab = "library";
+            selectedArtistFilter = null;
             playUiSfx("back");
           }}>{$t("library")}</button
         >
@@ -810,11 +863,16 @@
             {#if $isScanning}
               <div class="scan-bar">
                 {#if $scanStatus.totalFiles > 0}
-                  {@const pct = Math.round($scanStatus.filesScanned / $scanStatus.totalFiles * 100)}
+                  {@const pct = Math.round(
+                    ($scanStatus.filesScanned / $scanStatus.totalFiles) * 100,
+                  )}
                   <div class="scan-bar-track">
                     <div class="scan-bar-fill" style="width: {pct}%"></div>
                   </div>
-                  <span class="scan-bar-label">{pct}% · {$scanStatus.albumsFound} {$t("albumsFound")}</span>
+                  <span class="scan-bar-label"
+                    >{pct}% · {$scanStatus.albumsFound}
+                    {$t("albumsFound")}</span
+                  >
                 {:else}
                   <div class="spinner-sm"></div>
                   <span>{$t("startingScan")}</span>
@@ -1737,12 +1795,20 @@
   }
 
   @keyframes drag-fade-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   @keyframes drag-bounce {
-    from { transform: translateY(-6px); }
-    to   { transform: translateY(6px); }
+    from {
+      transform: translateY(-6px);
+    }
+    to {
+      transform: translateY(6px);
+    }
   }
 </style>
