@@ -40,7 +40,7 @@ fn save_cover_bytes(bytes: &[u8], id: &str, dir: &std::path::Path) -> Option<Str
 // ── Scanner commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<String, String> {
+async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<(), String> {
     let covers_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("covers");
@@ -95,11 +95,7 @@ async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<String
         app2.emit("cover:fetch:done", ()).ok();
     });
 
-    let size = tokio::task::spawn_blocking(move || calculate_library_size(&path))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(format_size(size))
+    Ok(())
 }
 
 async fn fetch_cover_online(

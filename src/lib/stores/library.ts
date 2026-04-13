@@ -19,7 +19,7 @@ export const albums        = writable<Album[]>([]);
 export const isScanning    = writable(false);
 export const librarySize   = writable(localStorage.getItem(SIZE_KEY) ?? '');
 export const selectedAlbum = writable<Album | null>(null);
-export const scanStatus    = writable({ filesScanned: 0, albumsFound: 0 });
+export const scanStatus    = writable({ filesScanned: 0, albumsFound: 0, totalFiles: 0 });
 
 export const albumCount = derived(albums, ($a) => $a.length);
 
@@ -71,13 +71,20 @@ export async function loadCache(): Promise<boolean> {
 
 async function scanOne(path: string): Promise<void> {
   const unlisten: Array<() => void> = [];
+  let albumsFound = 0;
 
   await new Promise<void>(async (resolve) => {
-    unlisten.push(await listen<{ files_scanned: number; albums_found: number }>(
+    unlisten.push(await listen<{ total: number }>('scan:start', (e) => {
+      scanStatus.update(s => ({ ...s, totalFiles: e.payload.total, filesScanned: 0, albumsFound: 0 }));
+      albumsFound = 0;
+    }));
+    unlisten.push(await listen<{ files_scanned: number }>(
       'scan:progress',
-      (e) => scanStatus.set({ filesScanned: e.payload.files_scanned, albumsFound: e.payload.albums_found })
+      (e) => scanStatus.update(s => ({ ...s, filesScanned: e.payload.files_scanned }))
     ));
     unlisten.push(await listen<Album>('scan:album', (e) => {
+      albumsFound++;
+      scanStatus.update(s => ({ ...s, albumsFound }));
       albums.update((a) => [...a, e.payload]);
     }));
     unlisten.push(await listen<void>('scan:done', () => {
@@ -86,9 +93,7 @@ async function scanOne(path: string): Promise<void> {
     }));
 
     try {
-      const size = await invoke<string>('scan_music_folder', { path });
-      librarySize.set(size);
-      localStorage.setItem(SIZE_KEY, size);
+      await invoke('scan_music_folder', { path });
     } catch (e) {
       console.error('Scan failed:', e);
       unlisten.forEach(u => u());
@@ -97,39 +102,82 @@ async function scanOne(path: string): Promise<void> {
   });
 }
 
+// Calculates total library size across all known folders and persists it.
+async function updateTotalLibrarySize() {
+  const paths = get(folderPaths);
+  if (!paths.length) return;
+  try {
+    const sizeStrings = await Promise.all(
+      paths.map(p => invoke<string>('get_library_size', { path: p }))
+    );
+    let totalBytes = 0;
+    for (const s of sizeStrings) {
+      const m = s.match(/([\d.]+)\s*(GB|MB)/);
+      if (m) {
+        const val = parseFloat(m[1]);
+        totalBytes += m[2] === 'GB'
+          ? Math.round(val * 1_073_741_824)
+          : Math.round(val * 1_048_576);
+      }
+    }
+    const GB = 1_073_741_824;
+    const MB = 1_048_576;
+    const size = totalBytes >= GB
+      ? `${(totalBytes / GB).toFixed(3)} GB`
+      : `${Math.round(totalBytes / MB)} MB`;
+    librarySize.set(size);
+    localStorage.setItem(SIZE_KEY, size);
+  } catch (e) {
+    console.error('Failed to calculate total library size:', e);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
+// Ensures only one scan runs at a time. All scanFolder / refreshLibrary calls
+// are serialised through this chain, preventing Tauri event listener conflicts.
+let scanLock: Promise<void> = Promise.resolve();
+
 export async function scanFolder(path: string) {
-  const paths = get(folderPaths);
-  if (!paths.includes(path)) {
+  scanLock = scanLock.then(async () => {
+    const paths = get(folderPaths);
+    // Skip if already in the library — use "Refresh library" to rescan.
+    if (paths.includes(path)) return;
+
     const next = [...paths, path];
     folderPaths.set(next);
     saveFolders(next);
-  }
 
-  isScanning.set(true);
-  scanStatus.set({ filesScanned: 0, albumsFound: 0 });
+    isScanning.set(true);
+    scanStatus.set({ filesScanned: 0, albumsFound: 0, totalFiles: 0 });
 
-  await scanOne(path);
+    await scanOne(path);
 
-  isScanning.set(false);
-  await saveCache();
+    isScanning.set(false);
+    await updateTotalLibrarySize();
+    await saveCache();
+  }).catch((e) => { console.error('scanFolder error:', e); });
+  return scanLock;
 }
 
 export async function refreshLibrary() {
-  const paths = get(folderPaths);
-  if (!paths.length) return;
+  scanLock = scanLock.then(async () => {
+    const paths = get(folderPaths);
+    if (!paths.length) return;
 
-  isScanning.set(true);
-  albums.set([]);
-  scanStatus.set({ filesScanned: 0, albumsFound: 0 });
+    isScanning.set(true);
+    albums.set([]);
+    scanStatus.set({ filesScanned: 0, albumsFound: 0, totalFiles: 0 });
 
-  for (const path of paths) {
-    await scanOne(path);
-  }
+    for (const path of paths) {
+      await scanOne(path);
+    }
 
-  isScanning.set(false);
-  await saveCache();
+    isScanning.set(false);
+    await updateTotalLibrarySize();
+    await saveCache();
+  }).catch((e) => { console.error('refreshLibrary error:', e); });
+  return scanLock;
 }
 
 export function clearLibrary() {
@@ -139,6 +187,6 @@ export function clearLibrary() {
   localStorage.removeItem(SIZE_KEY);
   folderPaths.set([]);
   saveFolders([]);
-  scanStatus.set({ filesScanned: 0, albumsFound: 0 });
+  scanStatus.set({ filesScanned: 0, albumsFound: 0, totalFiles: 0 });
   invoke('save_library_cache', { data: '[]' }).catch(() => {});
 }

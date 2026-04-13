@@ -1,6 +1,7 @@
 <script lang="ts">
   import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
   import AlbumGrid from "$lib/components/AlbumGrid.svelte";
   import type AlbumGridType from "$lib/components/AlbumGrid.svelte";
@@ -30,6 +31,7 @@
     selectedAlbum,
     scanStatus,
     loadCache,
+    scanFolder,
   } from "$lib/stores/library";
   import {
     currentTrack,
@@ -78,6 +80,7 @@
   let selectedArtistFilter = $state<string | null>(null);
   let optionsOpen = $state(false);
   let statsOpen = $state(false);
+  let isDragOver = $state(false);
   let npPickerOpen = $state(false);
   let searchOpen = $state(false);
   let searchQuery = $state("");
@@ -345,6 +348,39 @@
     // Gamepad support
     initGamepad();
     addGamepadListener(handleGamepadAction);
+
+    // Drag-and-drop folder/file scanning
+    const webview = getCurrentWebview();
+    webview.onDragDropEvent((event) => {
+      const type = event.payload.type;
+      if (type === "enter" || type === "over") {
+        isDragOver = true;
+      } else if (type === "leave") {
+        isDragOver = false;
+      } else if (type === "drop") {
+        isDragOver = false;
+        const rawPaths = (event.payload as { paths: string[] }).paths;
+        // If individual audio files are dropped, use the parent directory so the
+        // whole album folder is scanned. Deduplicate in case multiple files from
+        // the same folder are dropped at once.
+        const AUDIO_EXTS = new Set(["mp3","flac","ogg","m4a","aac","wav","opus"]);
+        const resolved = [...new Set(rawPaths.map((p) => {
+          const ext = p.split(".").pop()?.toLowerCase() ?? "";
+          if (AUDIO_EXTS.has(ext)) {
+            const lastSep = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+            return lastSep >= 0 ? p.slice(0, lastSep) : p;
+          }
+          return p;
+        }))];
+        // scanFolder serialises internally via a lock, but we still await to
+        // avoid the async IIFE being garbage-collected early.
+        (async () => {
+          for (const path of resolved) {
+            await scanFolder(path);
+          }
+        })();
+      }
+    });
   });
 
   function handleGamepadAction(action: GamepadAction) {
@@ -626,6 +662,15 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="root" class:mode-mini={$viewMode === "mini"}>
+  {#if isDragOver}
+    <div class="drag-overlay">
+      <div class="drag-overlay-inner">
+        <div class="drag-icon">▼</div>
+        <span>{$t("dropToAdd")}</span>
+      </div>
+    </div>
+  {/if}
+
   <ViewModeBar />
 
   {#if $viewMode === "mini"}
@@ -656,7 +701,21 @@
               spellcheck="false"
             />
           {:else if $isScanning}
-            <span class="scanning">{$t("scanning")}</span>
+            <div class="scan-status">
+              <span class="scan-status-text">
+                {#if $scanStatus.totalFiles > 0}
+                  {$scanStatus.filesScanned.toLocaleString()} / {$scanStatus.totalFiles.toLocaleString()} · {$scanStatus.albumsFound} albums
+                {:else}
+                  {$t("scanning")}
+                {/if}
+              </span>
+              <div class="scan-status-bar">
+                <div
+                  class="scan-status-fill"
+                  style="width: {$scanStatus.totalFiles > 0 ? Math.round($scanStatus.filesScanned / $scanStatus.totalFiles * 100) : 0}%"
+                ></div>
+              </div>
+            </div>
           {/if}
           {#if activeTab === "library" && hoveredAlbum && !selectedArtistFilter}
             <span class="hovered-title" class:hovered-title--small={searchOpen}
@@ -750,14 +809,16 @@
           {:else}
             {#if $isScanning}
               <div class="scan-bar">
-                <div class="spinner-sm"></div>
-                <span
-                  >{$t(
-                    "scanFilesFound",
-                    $scanStatus.filesScanned,
-                    $scanStatus.albumsFound,
-                  )}</span
-                >
+                {#if $scanStatus.totalFiles > 0}
+                  {@const pct = Math.round($scanStatus.filesScanned / $scanStatus.totalFiles * 100)}
+                  <div class="scan-bar-track">
+                    <div class="scan-bar-fill" style="width: {pct}%"></div>
+                  </div>
+                  <span class="scan-bar-label">{pct}% · {$scanStatus.albumsFound} {$t("albumsFound")}</span>
+                {:else}
+                  <div class="spinner-sm"></div>
+                  <span>{$t("startingScan")}</span>
+                {/if}
               </div>
             {/if}
             {#if searchOpen && searchQuery && filteredAlbums.length === 0}
@@ -1085,11 +1146,60 @@
     max-width: 50%;
   }
 
-  .scanning {
-    font-size: 12px;
-    color: var(--text-dim);
-    letter-spacing: 0.05em;
+  /* ── Scan progress in header ── */
+  .scan-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
     padding-top: 4px;
+  }
+
+  .scan-status-text {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .scan-status-bar {
+    width: 160px;
+    height: 3px;
+    background: rgba(90, 95, 120, 0.2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .scan-status-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #5a6ad4, #9a8adf);
+    border-radius: 2px;
+    transition: width 0.25s ease;
+    box-shadow: 0 0 6px rgba(120, 130, 220, 0.5);
+  }
+
+  /* ── Scan bar in library content ── */
+  .scan-bar-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(90, 95, 120, 0.2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .scan-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #5a6ad4, #9a8adf);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+    box-shadow: 0 0 8px rgba(120, 130, 220, 0.45);
+  }
+
+  .scan-bar-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .hovered-title {
@@ -1246,7 +1356,7 @@
   .scan-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     padding: 0 2px 12px;
     font-size: 12px;
     color: var(--text-dim);
@@ -1591,5 +1701,48 @@
     -webkit-line-clamp: 1;
     line-clamp: 1;
     line-height: 1.2;
+  }
+
+  /* ── Drag-and-drop overlay ── */
+  .drag-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(8, 8, 20, 0.75);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    border: 2px dashed rgba(120, 130, 220, 0.6);
+    border-radius: 6px;
+    animation: drag-fade-in 0.12s ease;
+  }
+
+  .drag-overlay-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    color: rgba(200, 205, 240, 0.9);
+    font-size: 18px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .drag-icon {
+    font-size: 42px;
+    animation: drag-bounce 0.7s ease infinite alternate;
+    color: rgba(140, 150, 230, 0.85);
+  }
+
+  @keyframes drag-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes drag-bounce {
+    from { transform: translateY(-6px); }
+    to   { transform: translateY(6px); }
   }
 </style>

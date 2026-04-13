@@ -282,6 +282,10 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
         .collect();
 
     let total = paths.len() as u32;
+
+    // Tell the frontend how many files we're about to process
+    app.emit("scan:start", serde_json::json!({ "total": total })).ok();
+
     let counter = Arc::new(AtomicU32::new(0));
     let app_ref = app.clone();
     let cnt = Arc::clone(&counter);
@@ -292,7 +296,7 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
         .filter_map(|path| {
             let result = read_track_and_cover(path)?;
             let n = cnt.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 50 == 0 || n == total {
+            if n % 20 == 0 || n == total {
                 app_ref.emit("scan:progress", ScanProgress { files_scanned: n, albums_found: 0 }).ok();
             }
             Some((result, path.clone()))
