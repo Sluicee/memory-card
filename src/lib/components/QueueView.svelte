@@ -141,7 +141,12 @@
           {#if $currentAlbum?.cover_art}
             <img src={convertFileSrc($currentAlbum.cover_art)} alt="" />
           {:else}
-            <span class="art-ph">♪</span>
+            <span class="art-ph">
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+                <path d="M9 13c0 1.105-1.12 2-2.5 2S4 14.105 4 13s1.12-2 2.5-2 2.5.895 2.5 2zM9 3v7h1v-7H9z"/>
+                <path d="M9 3v.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5h-4A.5.5 0 0 0 9 3z"/>
+              </svg>
+            </span>
           {/if}
           {#if $isPlaying}<span class="pulse-dot"></span>{/if}
         </div>

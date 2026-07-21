@@ -152,7 +152,12 @@
               size={260}
             />
           {:else}
-            <div class="disc-placeholder">♪</div>
+            <div class="disc-placeholder">
+              <svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor">
+                <path d="M9 13c0 1.105-1.12 2-2.5 2S4 14.105 4 13s1.12-2 2.5-2 2.5.895 2.5 2zM9 3v7h1v-7H9z"/>
+                <path d="M9 3v.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5h-4A.5.5 0 0 0 9 3z"/>
+              </svg>
+            </div>
           {/if}
         </div>
 

@@ -240,7 +240,12 @@
                   alt=""
                 />
               {:else}
-                <div class="thumb thumb--round thumb--empty">♪</div>
+                <div class="thumb thumb--round thumb--empty">
+                  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+                    <path d="M9 13c0 1.105-1.12 2-2.5 2S4 14.105 4 13s1.12-2 2.5-2 2.5.895 2.5 2zM9 3v7h1v-7H9z"/>
+                    <path d="M9 3v.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5h-4A.5.5 0 0 0 9 3z"/>
+                  </svg>
+                </div>
               {/if}
               <div class="row-info">
                 <span class="row-title">{entry.artist}</span>
@@ -267,7 +272,12 @@
                   alt=""
                 />
               {:else}
-                <div class="thumb thumb--empty">♪</div>
+                <div class="thumb thumb--empty">
+                  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+                    <path d="M9 13c0 1.105-1.12 2-2.5 2S4 14.105 4 13s1.12-2 2.5-2 2.5.895 2.5 2zM9 3v7h1v-7H9z"/>
+                    <path d="M9 3v.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5h-4A.5.5 0 0 0 9 3z"/>
+                  </svg>
+                </div>
               {/if}
               <div class="row-info">
                 <span class="row-title">{entry.album.title}</span>
@@ -314,7 +324,12 @@
                 alt=""
               />
             {:else}
-              <div class="thumb thumb--empty">♪</div>
+              <div class="thumb thumb--empty">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+                  <path d="M9 13c0 1.105-1.12 2-2.5 2S4 14.105 4 13s1.12-2 2.5-2 2.5.895 2.5 2zM9 3v7h1v-7H9z"/>
+                  <path d="M9 3v.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5h-4A.5.5 0 0 0 9 3z"/>
+                </svg>
+              </div>
             {/if}
             <div class="row-info">
               <span class="row-title">{entry.track.title}</span>
