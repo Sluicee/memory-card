@@ -312,6 +312,7 @@
         }
         case "fullscreen":
           await win.setAlwaysOnTop(false);
+          await win.setResizable(true);
           await win.setFullscreen(true);
           break;
         case "mini":
