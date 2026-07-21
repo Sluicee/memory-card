@@ -232,7 +232,7 @@
           <svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor" style="display: inline-block; vertical-align: middle;">
             <path d="M3.612 15.443c-.386.198-.824-.149-.746-.592l.83-4.73L.173 6.765c-.329-.314-.158-.888.283-.95l4.898-.696L7.538.792c.197-.39.73-.39.927 0l2.184 4.327 4.898.696c.441.062.612.636.282.95l-3.522 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187l-4.389 2.256z"/>
           </svg>
-        {#else}
+        {:else}
           <svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor" style="display: inline-block; vertical-align: middle;">
             <path d="M9 13c0 1.105-1.12 2-2.5 2S4 14.105 4 13s1.12-2 2.5-2 2.5.895 2.5 2zM9 3v7h1v-7H9z"/>
             <path d="M9 3v.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5h-4A.5.5 0 0 0 9 3z"/>
