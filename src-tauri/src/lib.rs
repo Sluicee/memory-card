@@ -21,32 +21,44 @@ struct UpdateCheck {
 // ── Dialog commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn pick_folder(app: tauri::AppHandle) -> Option<String> {
-    app.dialog()
-        .file()
-        .blocking_pick_folder()
-        .map(|p| p.to_string())
+async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .map(|p| p.to_string())
+    })
+    .await
+    .unwrap_or(None)
 }
 
 #[tauri::command]
-fn pick_save_file(app: tauri::AppHandle, default_name: String) -> Option<String> {
-    app.dialog()
-        .file()
-        .set_file_name(&default_name)
-        .add_filter("M3U Playlist", &["m3u", "m3u8"])
-        .add_filter("CSV Playlist", &["csv"])
-        .add_filter("Text Playlist", &["txt"])
-        .blocking_save_file()
-        .map(|p| p.to_string())
+async fn pick_save_file(app: tauri::AppHandle, default_name: String) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(&default_name)
+            .add_filter("M3U Playlist", &["m3u", "m3u8"])
+            .add_filter("CSV Playlist", &["csv"])
+            .add_filter("Text Playlist", &["txt"])
+            .blocking_save_file()
+            .map(|p| p.to_string())
+    })
+    .await
+    .unwrap_or(None)
 }
 
 #[tauri::command]
-fn pick_open_file(app: tauri::AppHandle) -> Option<String> {
-    app.dialog()
-        .file()
-        .add_filter("Playlist files", &["m3u", "m3u8", "csv", "txt"])
-        .blocking_pick_file()
-        .map(|p| p.to_string())
+async fn pick_open_file(app: tauri::AppHandle) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Playlist files", &["m3u", "m3u8", "csv", "txt"])
+            .blocking_pick_file()
+            .map(|p| p.to_string())
+    })
+    .await
+    .unwrap_or(None)
 }
 
 #[tauri::command]
