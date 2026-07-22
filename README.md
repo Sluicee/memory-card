@@ -17,6 +17,20 @@ A desktop music player with a retro PS2/CRT aesthetic, built with Tauri 2, Svelt
 - Shuffle, volume control, seek
 - Library cache persisted to disk — fast startup after first scan
 
+## Installation
+
+### Arch Linux (AUR)
+
+You can install `memory-card` directly from the AUR using `yay` (or any other AUR helper):
+
+```bash
+yay -S memory-card-bin
+```
+
+### Windows & Other Linux Distros
+
+Download the pre-compiled packages (`.exe` or `.deb`) from the **[GitHub Releases](https://github.com/Sluicee/memory-card/releases)** page.
+
 ## Documentation & Controls
 
 For detailed information on how to organize your music and how the library is scanned, see the **[User Manual](docs/MANUAL.md)** ([RU](docs/MANUAL_RU.md)).
