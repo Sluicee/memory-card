@@ -87,19 +87,28 @@ impl FFmpegSource {
         // Spawn a background thread to fill the buffer
         std::thread::spawn(move || {
             let mut reader = BufReader::with_capacity(64 * 1024, stdout);
-            let mut buf = [0u8; 4];
+            let mut chunk = [0u8; 4096]; // 1024 samples
 
-            while reader.read_exact(&mut buf).is_ok() {
-                let sample = f32::from_le_bytes(buf);
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let samples_count = n / 4;
+                        for i in 0..samples_count {
+                            let mut sample_bytes = [0u8; 4];
+                            sample_bytes.copy_from_slice(&chunk[i * 4..i * 4 + 4]);
+                            let sample = f32::from_le_bytes(sample_bytes);
 
-                // Keep trying to push to the ring buffer.
-                // If it's full, wait a tiny bit to avoid CPU spin.
-                while producer.push(sample).is_err() {
-                    // Stop if the consumer side is dropped (e.g. track stopped)
-                    if producer.is_abandoned() {
-                        return;
+                            while producer.push(sample).is_err() {
+                                // Stop if the consumer side is dropped (e.g. track stopped)
+                                if producer.is_abandoned() {
+                                    return;
+                                }
+                                std::thread::sleep(Duration::from_millis(2));
+                            }
+                        }
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    Err(_) => break,
                 }
             }
         });

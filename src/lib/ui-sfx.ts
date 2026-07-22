@@ -42,35 +42,44 @@ if (browser) {
   });
 }
 
-const templates = new Map<UiSfxName, HTMLAudioElement>();
+const templates = new Map<UiSfxName, string>();
 
-function getTemplate(name: UiSfxName): HTMLAudioElement | null {
-  if (typeof Audio === 'undefined') return null;
+async function loadSfxBlob(name: UiSfxName): Promise<string> {
+  const cached = templates.get(name);
+  if (cached) return cached;
 
-  let audio = templates.get(name);
-  if (!audio) {
-    audio = new Audio(SOURCES[name]);
-    audio.preload = 'auto';
-    templates.set(name, audio);
+  try {
+    const res = await fetch(SOURCES[name]);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    templates.set(name, blobUrl);
+    return blobUrl;
+  } catch (e) {
+    console.error(`Failed to load SFX ${name}:`, e);
+    return SOURCES[name];
   }
-
-  return audio;
 }
 
 export function primeUiSfx() {
+  if (!browser) return;
   for (const name of Object.keys(SOURCES) as UiSfxName[]) {
-    getTemplate(name)?.load();
+    void loadSfxBlob(name);
   }
 }
 
-export function playUiSfx(name: UiSfxName, volume = DEFAULT_VOLUMES[name]) {
+export async function playUiSfx(name: UiSfxName, volume = DEFAULT_VOLUMES[name]) {
   if (!get(sfxEnabled)) return;
+  if (typeof Audio === 'undefined') return;
 
-  const template = getTemplate(name);
-  if (!template) return;
+  let blobUrl = templates.get(name);
+  if (!blobUrl) {
+    blobUrl = await loadSfxBlob(name);
+  }
 
-  const instance = template.cloneNode(true) as HTMLAudioElement;
+  const instance = new Audio(blobUrl);
   instance.volume = volume;
   instance.currentTime = 0;
-  void instance.play().catch(() => {});
+  void instance.play().catch((e) => {
+    console.error('Play sfx error:', e);
+  });
 }
