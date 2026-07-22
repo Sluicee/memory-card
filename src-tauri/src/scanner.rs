@@ -68,8 +68,9 @@ struct TrackResult {
     cover: Option<(Vec<u8>, String)>,
 }
 
-/// Opens the audio file once and extracts both track metadata and cover art.
+/// Opens the audio file once and extracts track metadata.
 fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
+    println!("Scanning: {}", path.display());
     let tagged_file = Probe::open(path).ok()?.read().ok()?;
     let duration = tagged_file.properties().duration().as_secs_f64();
     let path_str = path.to_string_lossy().to_string();
@@ -97,15 +98,6 @@ fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
     let disc_number = tag.and_then(|t| t.disk()).unwrap_or(1);
     let year = tag.and_then(|t| t.year());
 
-    let cover = tag
-        .and_then(|t| t.pictures().first())
-        .map(|pic| {
-            let mime = pic.mime_type()
-                .map(|m| m.to_string())
-                .unwrap_or_else(|| "image/jpeg".to_string());
-            (pic.data().to_vec(), mime)
-        });
-
     let search_index = format!(
         "{} {}",
         any_ascii(&title).to_lowercase(),
@@ -126,8 +118,20 @@ fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
             search_index,
         },
         explicit_album_artist,
-        cover,
+        cover: None,
     })
+}
+
+/// Reads the embedded cover art from a specific file with pictures enabled (lazy loading).
+fn read_embedded_cover_from_file(path: &Path) -> Option<(Vec<u8>, String)> {
+    println!("Reading embedded cover from: {}", path.display());
+    let tagged_file = Probe::open(path).ok()?.read().ok()?;
+    let tag = tagged_file.primary_tag()?;
+    let pic = tag.pictures().first()?;
+    let mime = pic.mime_type()
+        .map(|m| m.to_string())
+        .unwrap_or_else(|| "image/jpeg".to_string());
+    Some((pic.data().to_vec(), mime))
 }
 
 /// Look for a cover image file in the album folder.
@@ -176,6 +180,7 @@ fn save_embedded_cover(data: &[u8], mime: &str, album_id: &str, covers_dir: &Pat
 /// Copy a folder image, resizing to max 600px if needed.
 /// Folder art can be 3000+ px, so we decode and resize.
 fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option<String> {
+    println!("Resizing cover image: {:?}", src);
     let dest = covers_dir.join(cover_filename(album_id, "image/jpeg"));
     if dest.exists() {
         return Some(dest.to_string_lossy().into_owned());
@@ -296,18 +301,18 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
         .filter_map(|path| {
             let result = read_track_and_cover(path)?;
             let n = cnt.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 20 == 0 || n == total {
+            if n % 200 == 0 || n == total {
                 app_ref.emit("scan:progress", ScanProgress { files_scanned: n, albums_found: 0 }).ok();
             }
             Some((result, path.clone()))
         })
         .collect();
 
-    // Phase 3: group into albums + resolve covers
+    // Phase 3: group into albums
     let mut albums: HashMap<String, Album> = HashMap::new();
 
     for (result, audio_path) in results {
-        let TrackResult { track, explicit_album_artist, cover } = result;
+        let TrackResult { track, explicit_album_artist, cover: _ } = result;
         
         let album_name_norm = strip_disc_suffix(track.album.trim()).to_lowercase();
         let album_key = if album_name_norm.is_empty() || album_name_norm == "unknown album" {
@@ -333,34 +338,37 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
             ),
         });
 
-        if album.cover_art.is_none() {
+        album.total_duration += track.duration;
+        album.tracks.push(track);
+    }
+
+    // Phase 4: sort, finalize compilation artists, and resolve cover art (ONCE PER ALBUM)
+    let mut album_list: Vec<Album> = albums.into_values().collect();
+    for album in &mut album_list {
+        album.tracks.sort_by_key(|t| (t.disc_number, t.track_number));
+
+        // Resolve cover art ONCE for the entire album using the first track's path
+        if let Some(first_track) = album.tracks.first() {
+            let audio_path = Path::new(&first_track.path);
+            
             // 1. Check cache first (most frequent case for large libraries)
             let cached_path = covers_dir.join(cover_filename(&album.id, "image/jpeg"));
             if cached_path.exists() {
                 album.cover_art = Some(cached_path.to_string_lossy().into_owned());
             }
 
-            // 2. Embedded tag cover
+            // 2. Folder image
             if album.cover_art.is_none() {
-                if let Some((data, mime)) = cover {
+                album.cover_art = find_folder_cover(audio_path, &album.id, covers_dir);
+            }
+
+            // 3. Embedded tag cover (read on demand from the current track's file)
+            if album.cover_art.is_none() {
+                if let Some((data, mime)) = read_embedded_cover_from_file(audio_path) {
                     album.cover_art = save_embedded_cover(&data, &mime, &album.id, covers_dir);
                 }
             }
-
-            // 3. Folder image
-            if album.cover_art.is_none() {
-                album.cover_art = find_folder_cover(&audio_path, &album.id, covers_dir);
-            }
         }
-
-        album.total_duration += track.duration;
-        album.tracks.push(track);
-    }
-
-    // Phase 4: sort and finalize compilation artists
-    let mut album_list: Vec<Album> = albums.into_values().collect();
-    for album in &mut album_list {
-        album.tracks.sort_by_key(|t| (t.disc_number, t.track_number));
 
         let mut unique_base_artists: Vec<String> = Vec::new();
         let mut display_artists: Vec<String> = Vec::new();
