@@ -28,9 +28,9 @@ impl FFmpegSource {
             "-ac",
             "2",
             "-ar",
-            "48000",
+            "44100",
             "-af",
-            "volume=0.95",
+            "volume=0.90,alimiter=limit=0.95",
             "-vn",
             "-sn",
             "-map_metadata",
@@ -80,43 +80,48 @@ impl FFmpegSource {
 
         let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
 
-        // Create a ring buffer for 0.5 seconds of audio (48000 samples for 2 channels)
+        // Create a ring buffer for 2.0 seconds of audio (192000 samples for 2 channels)
         // This decouples the blocking pipe-read from the rodio pull-method.
-        let (mut producer, consumer) = RingBuffer::new(48000);
+        let (mut producer, consumer) = RingBuffer::new(192000);
 
         // Spawn a background thread to fill the buffer
         std::thread::spawn(move || {
             let mut reader = BufReader::with_capacity(64 * 1024, stdout);
             let mut chunk = [0u8; 4096]; // 1024 samples
 
-            loop {
-                match reader.read(&mut chunk) {
-                    Ok(0) => break, // EOF
-                    Ok(n) => {
-                        let samples_count = n / 4;
-                        for i in 0..samples_count {
-                            let mut sample_bytes = [0u8; 4];
-                            sample_bytes.copy_from_slice(&chunk[i * 4..i * 4 + 4]);
-                            let sample = f32::from_le_bytes(sample_bytes);
+            // Read in large chunks as long as we can fill them
+            while reader.read_exact(&mut chunk).is_ok() {
+                for i in 0..1024 {
+                    let mut sample_bytes = [0u8; 4];
+                    sample_bytes.copy_from_slice(&chunk[i * 4..i * 4 + 4]);
+                    let sample = f32::from_le_bytes(sample_bytes).clamp(-1.0, 1.0);
 
-                            while producer.push(sample).is_err() {
-                                // Stop if the consumer side is dropped (e.g. track stopped)
-                                if producer.is_abandoned() {
-                                    return;
-                                }
-                                std::thread::sleep(Duration::from_millis(2));
-                            }
+                    while producer.push(sample).is_err() {
+                        if producer.is_abandoned() {
+                            return;
                         }
+                        std::thread::sleep(Duration::from_millis(15));
                     }
-                    Err(_) => break,
+                }
+            }
+
+            // Read the remaining bytes (less than 4096) at the end of the file
+            let mut small_buf = [0u8; 4];
+            while reader.read_exact(&mut small_buf).is_ok() {
+                let sample = f32::from_le_bytes(small_buf).clamp(-1.0, 1.0);
+                while producer.push(sample).is_err() {
+                    if producer.is_abandoned() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(15));
                 }
             }
         });
 
-        // Preroll: Wait until we have at least 2048 samples (~20ms) before returning.
-        // This ensures the audio thread has data immediately, preventing a "start-up click".
+        // Preroll: Wait until we have at least 44100 samples (~500ms) before returning.
+        // This ensures the audio thread has data immediately, preventing a "start-up click" or quick starvation.
         let mut attempts = 0;
-        while consumer.slots() < 2048 && attempts < 50 {
+        while consumer.slots() < 44100 && attempts < 150 {
             std::thread::sleep(Duration::from_millis(5));
             attempts += 1;
         }
@@ -124,7 +129,7 @@ impl FFmpegSource {
         Ok(Self {
             _child: child,
             consumer,
-            sample_rate: 48000,
+            sample_rate: 44100,
             channels: 2,
             silence_count: 0,
         })
@@ -135,27 +140,40 @@ impl Iterator for FFmpegSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
-        // Non-blocking pop.
-        // If FFmpeg is slow to start, we return 0.0 (silence) to keep the stream alive.
-        // This is THE key to eliminating pops/clicks on Windows.
-        match self.consumer.pop() {
-            Ok(sample) => {
-                self.silence_count = 0;
-                Some(sample)
-            }
-            Err(_) => {
-                // If the producer is gone, it means FFmpeg finished or crashed.
-                if self.consumer.is_abandoned() {
-                    return None;
+        let mut attempts = 0;
+        loop {
+            match self.consumer.pop() {
+                Ok(sample) => {
+                    self.silence_count = 0;
+                    return Some(sample);
                 }
-                // Buffer is empty but FFmpeg is still running. Play silence.
-                // Guard against FFmpeg hanging: if we've emitted more than ~2 seconds
-                // of silence (96_000 samples at 48kHz stereo), treat it as end-of-stream.
-                self.silence_count += 1;
-                if self.silence_count > 96_000 {
-                    return None;
+                Err(_) => {
+                    // If the producer is abandoned, it means FFmpeg finished or crashed.
+                    if self.consumer.is_abandoned() {
+                        return None;
+                    }
+                    
+                    // Buffer is empty but FFmpeg is still running.
+                    // Wait a tiny bit (up to 10 attempts * 250us = 2.5ms) before playing silence.
+                    // This mitigates CPU spikes/thread scheduling delays without causing xruns.
+                    if attempts < 10 {
+                        std::thread::sleep(Duration::from_micros(250));
+                        attempts += 1;
+                        continue;
+                    }
+                    
+                    if self.silence_count == 0 {
+                        println!("DEBUG: FFmpegSource buffer starved! Playing silence.");
+                    }
+                    
+                    // Guard against FFmpeg hanging: if we've emitted more than ~2 seconds
+                    // of silence (96_000 samples at 48kHz stereo), treat it as end-of-stream.
+                    self.silence_count += 1;
+                    if self.silence_count > 96_000 {
+                        return None;
+                    }
+                    return Some(0.0);
                 }
-                Some(0.0)
             }
         }
     }
