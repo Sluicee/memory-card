@@ -1,6 +1,6 @@
 {
   "name": "memory-card",
-  "version": "1.3.2",
+  "version": "1.3.4",
   "description": "A desktop music player with a retro PS2/CRT aesthetic",
   "type": "module",
   "scripts": {
