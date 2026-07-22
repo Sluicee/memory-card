@@ -60,12 +60,11 @@ jobs:
           const dest = join('src-tauri', 'binaries', `ffmpeg-${target}${ext}`);
           
           fs.mkdirSync(dirname(dest), { recursive: true });
-          if (!fs.existsSync(dest)) {
-            console.log(`Copying FFmpeg to ${dest}`);
-            fs.copyFileSync(ffmpeg, dest);
-          } else {
-            console.log(`FFmpeg sidecar already exists at ${dest}`);
-          }
+          try {
+            fs.unlinkSync(dest);
+          } catch (e) {}
+          console.log(`Copying FFmpeg to ${dest}`);
+          fs.copyFileSync(ffmpeg, dest);
           EOF
           node setup-sidecar.js
 
