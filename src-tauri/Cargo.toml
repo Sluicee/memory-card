@@ -1,6 +1,6 @@
 [package]
 name = "memory-card"
-version = "1.3.6"
+version = "1.3.7"
 description = "A desktop music player with a retro PS2/CRT aesthetic"
 authors = ["Sluicee"]
 edition = "2021"
