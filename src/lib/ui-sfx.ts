@@ -42,44 +42,72 @@ if (browser) {
   });
 }
 
-const templates = new Map<UiSfxName, string>();
+let audioCtx: AudioContext | null = null;
+const bufferCache = new Map<UiSfxName, Promise<AudioBuffer | null>>();
 
-async function loadSfxBlob(name: UiSfxName): Promise<string> {
-  const cached = templates.get(name);
+function getAudioContext(): AudioContext | null {
+  if (!browser) return null;
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+function loadSfxBuffer(name: UiSfxName): Promise<AudioBuffer | null> {
+  const cached = bufferCache.get(name);
   if (cached) return cached;
 
-  try {
-    const res = await fetch(SOURCES[name]);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    templates.set(name, blobUrl);
-    return blobUrl;
-  } catch (e) {
-    console.error(`Failed to load SFX ${name}:`, e);
-    return SOURCES[name];
-  }
+  const promise = (async () => {
+    const ctx = getAudioContext();
+    if (!ctx) return null;
+
+    try {
+      const res = await fetch(SOURCES[name]);
+      const arrayBuffer = await res.arrayBuffer();
+      return await ctx.decodeAudioData(arrayBuffer);
+    } catch (e) {
+      console.error(`Failed to load/decode SFX ${name}:`, e);
+      bufferCache.delete(name);
+      return null;
+    }
+  })();
+
+  bufferCache.set(name, promise);
+  return promise;
 }
 
 export function primeUiSfx() {
   if (!browser) return;
   for (const name of Object.keys(SOURCES) as UiSfxName[]) {
-    void loadSfxBlob(name);
+    void loadSfxBuffer(name);
   }
 }
 
 export async function playUiSfx(name: UiSfxName, volume = DEFAULT_VOLUMES[name]) {
   if (!get(sfxEnabled)) return;
-  if (typeof Audio === 'undefined') return;
+  if (!browser) return;
 
-  let blobUrl = templates.get(name);
-  if (!blobUrl) {
-    blobUrl = await loadSfxBlob(name);
-  }
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
 
-  const instance = new Audio(blobUrl);
-  instance.volume = volume;
-  instance.currentTime = 0;
-  void instance.play().catch((e) => {
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+
+    const buffer = await loadSfxBuffer(name);
+    if (!buffer) return;
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = volume;
+
+    source.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    source.start(0);
+  } catch (e) {
     console.error('Play sfx error:', e);
-  });
+  }
 }
