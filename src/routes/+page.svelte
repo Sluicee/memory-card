@@ -1304,7 +1304,7 @@
   .tab-toggle {
     position: relative;
     display: inline-grid;
-    grid-template-columns: repeat(3, 80px) 72px;
+    grid-template-columns: repeat(3, 110px) 85px;
     justify-self: start;
     background: linear-gradient(180deg, rgb(38, 38, 42), rgb(54, 58, 68));
     border: 1px solid rgba(212, 219, 240, 0.12);
@@ -1321,7 +1321,7 @@
     top: 2px;
     left: 2px;
     height: calc(100% - 4px);
-    width: 80px;
+    width: 110px;
     background: linear-gradient(180deg, #4a4a4f, #2a2a2f);
     border-radius: 4px;
     border: 1px solid rgba(212, 219, 240, 0.15);
@@ -1341,8 +1341,8 @@
   }
 
   .tab-thumb--queue {
-    transform: translateX(240px);
-    width: 72px;
+    transform: translateX(330px);
+    width: 85px;
   }
 
   .tab-opt {
