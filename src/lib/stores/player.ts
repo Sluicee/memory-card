@@ -417,52 +417,53 @@ export async function playPrev(album: Album) {
 // ── Shuffle ───────────────────────────────────────────────────────────────────
 
 export async function playShuffledAll(albums: Album[]) {
-  if (get(isShuffled) && _queue.length > albumCount(albums)) {
+  const all: QueueItem[] = albums.flatMap(a => a.tracks.map(t => ({ track: t, album: a })));
+  if (get(isShuffled) && !get(currentPlaylistId) && _queue.length === all.length) {
     stopShuffle();
     return;
   }
   if (get(repeatMode) === 'one') repeatMode.set('none');
-  const all: QueueItem[] = albums.flatMap(a => a.tracks.map(t => ({ track: t, album: a })));
   const current = get(currentTrack);
   const currentAlbumVal = get(currentAlbum);
-  if (current && currentAlbumVal && (get(isPlaying) || get(isPaused))) {
+  if (current && currentAlbumVal) {
     const rest = all.filter(item => item.track.id !== current.id);
     _queue = [{ track: current, album: currentAlbumVal }, ...fisherYates(rest)];
     _qIdx = 0;
     isShuffled.set(true);
+    currentPlaylistId.set(null);
     syncSourceQueue();
     preloadNext();
   } else {
     _queue = fisherYates(all);
     _qIdx = 0;
     isShuffled.set(true);
+    currentPlaylistId.set(null);
     syncSourceQueue();
     if (_queue[0]) await playTrack(_queue[0].track, _queue[0].album, true);
   }
 }
 
-function albumCount(albums: Album[]): number {
-  return albums.length;
-}
-
 export async function playShuffled(album: Album) {
-  if (get(isShuffled) && _queue.length === album.tracks.length) {
+  if (get(isShuffled) && !get(currentPlaylistId) && _queue.length === album.tracks.length) {
     stopShuffle();
     return;
   }
   if (get(repeatMode) === 'one') repeatMode.set('none');
   const current = get(currentTrack);
-  if (current && (get(isPlaying) || get(isPaused))) {
+  const isCurrentInAlbum = current && album.tracks.some(t => t.id === current.id);
+  if (isCurrentInAlbum) {
     const rest = album.tracks.filter(t => t.id !== current.id).map(t => ({ track: t, album }));
     _queue = [{ track: current, album }, ...fisherYates(rest)];
     _qIdx = 0;
     isShuffled.set(true);
+    currentPlaylistId.set(null);
     syncSourceQueue();
     preloadNext();
   } else {
     _queue = fisherYates(album.tracks.map(t => ({ track: t, album })));
     _qIdx = 0;
     isShuffled.set(true);
+    currentPlaylistId.set(null);
     syncSourceQueue();
     if (_queue[0]) await playTrack(_queue[0].track, _queue[0].album, true);
   }
@@ -480,13 +481,16 @@ export async function playPlaylist(items: QueueItem[], startIdx = 0, playlistId:
 
 export async function playShuffledPlaylist(items: QueueItem[], playlistId: string | null = null) {
   if (!items.length) return;
+  if (get(isShuffled) && get(currentPlaylistId) === playlistId && _queue.length === items.length) {
+    stopShuffle();
+    return;
+  }
   if (get(repeatMode) === 'one') repeatMode.set('none');
   const current = get(currentTrack);
-  if (current && (get(isPlaying) || get(isPaused))) {
-    const currentItem = items.find(i => i.track.id === current.id);
-    const rest = items.filter(i => i.track.id !== current.id);
-    const head = currentItem ?? { track: current, album: get(currentAlbum)! };
-    _queue = [head, ...fisherYates(rest)];
+  const currentItem = current ? items.find(i => i.track.id === current.id) : null;
+  if (currentItem) {
+    const rest = items.filter(i => i.track.id !== currentItem.track.id);
+    _queue = [currentItem, ...fisherYates(rest)];
     _qIdx = 0;
     isShuffled.set(true);
     currentPlaylistId.set(playlistId);
@@ -498,7 +502,7 @@ export async function playShuffledPlaylist(items: QueueItem[], playlistId: strin
     isShuffled.set(true);
     currentPlaylistId.set(playlistId);
     syncSourceQueue();
-    await playTrack(_queue[0].track, _queue[0].album, true);
+    if (_queue[0]) await playTrack(_queue[0].track, _queue[0].album, true);
   }
 }
 

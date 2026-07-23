@@ -102,6 +102,10 @@
   // Gamepad focus on the now-playing footer block
   let gpNowPlayingFocused = $state(false);
 
+  // Artist marquee width bindings
+  let containerWidth = $state(0);
+  let textWidth = $state(0);
+
   const groupedArtists = $derived(
     Object.values(
       $albums.reduce(
@@ -1014,7 +1018,15 @@
                 <span class="track-name"
                   >{$currentTrack?.title ?? $t("noTrackPlaying")}</span
                 >
-                <span class="track-artist">{$currentTrack?.artist ?? "—"}</span>
+                <div class="artist-marquee" bind:clientWidth={containerWidth}>
+                  <span
+                    class="track-artist"
+                    bind:clientWidth={textWidth}
+                    class:animate={textWidth > containerWidth}
+                    style="--scroll-dist: -{textWidth - containerWidth}px"
+                    >{$currentTrack?.artist ?? "—"}</span
+                  >
+                </div>
               </div>
             </button>
             {#if $currentTrack}
@@ -1590,9 +1602,33 @@
     max-width: 160px;
   }
 
+  .artist-marquee {
+    overflow: hidden;
+    width: 100%;
+    max-width: 160px;
+    white-space: nowrap;
+    text-wrap: nowrap;
+  }
+
   .track-artist {
     font-size: 11px;
     color: var(--text-secondary);
+    white-space: nowrap;
+    text-wrap: nowrap;
+    display: inline-block;
+  }
+
+  .track-artist.animate {
+    animation: marquee-scroll 10s linear infinite alternate;
+  }
+
+  .track-artist.animate:hover {
+    animation-play-state: paused;
+  }
+
+  @keyframes marquee-scroll {
+    0%, 20% { transform: translateX(0); }
+    80%, 100% { transform: translateX(var(--scroll-dist, 0)); }
   }
 
   /* Transport controls */
