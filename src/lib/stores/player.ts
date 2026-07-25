@@ -159,6 +159,32 @@ function syncUserQueue() {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let _advancing = false;
+let _currentHistoryId: string | null = null;
+let _hasCountedPlay = false;
+let _activeTrackId: string | null = null;
+let _activeTrackDuration = 0;
+
+function flushOutgoingTrackStats() {
+  const prevTrack = get(currentTrack);
+  if (prevTrack && _activeTrackId === prevTrack.id) {
+    const pos = get(position);
+    const dur = get(duration) || _activeTrackDuration || prevTrack.duration || 0;
+    const threshold = Math.max(10, dur * 0.25);
+
+    if (!_hasCountedPlay && pos >= threshold) {
+      _currentHistoryId = recordPlay(prevTrack.id);
+      _hasCountedPlay = true;
+    }
+
+    if (_hasCountedPlay) {
+      recordListened(prevTrack.id, pos, _currentHistoryId);
+    }
+  }
+  _currentHistoryId = null;
+  _hasCountedPlay = false;
+  _activeTrackId = null;
+  _activeTrackDuration = 0;
+}
 
 function startPolling() {
   if (pollTimer) return;
@@ -169,10 +195,41 @@ function startPolling() {
     if (_advancing) return;
     _advancing = true;
     try {
-      position.set(await invoke<number>('audio_get_position'));
+      const pos = await invoke<number>('audio_get_position');
+      position.set(pos);
+
+      // Check 25% threshold during active playback
+      if (!_hasCountedPlay && _activeTrackId) {
+        const dur = get(duration) || _activeTrackDuration || 0;
+        const threshold = Math.max(10, dur * 0.25);
+        if (pos >= threshold) {
+          _hasCountedPlay = true;
+          _currentHistoryId = recordPlay(_activeTrackId);
+          recordListened(_activeTrackId, pos, _currentHistoryId);
+        }
+      } else if (_hasCountedPlay && _activeTrackId) {
+        recordListened(_activeTrackId, pos, _currentHistoryId);
+      }
+
       if (await invoke<boolean>('audio_is_finished')) {
         const finished = get(currentTrack);
-        if (finished) recordListened(finished.id, get(duration));
+        if (finished) {
+          const dur = get(duration) || _activeTrackDuration || finished.duration || 0;
+          const currentPos = get(position);
+          const threshold = Math.max(10, dur * 0.25);
+          if (!_hasCountedPlay && currentPos >= threshold) {
+            _currentHistoryId = recordPlay(finished.id);
+            _hasCountedPlay = true;
+          }
+          if (_hasCountedPlay) {
+            recordListened(finished.id, dur, _currentHistoryId);
+          }
+        }
+        _currentHistoryId = null;
+        _hasCountedPlay = false;
+        _activeTrackId = null;
+        _activeTrackDuration = 0;
+
         const rm = get(repeatMode);
         if (rm === 'one') {
           const track = get(currentTrack);
@@ -264,13 +321,15 @@ export async function playTrack(track: Track, album: Album, fromShuffle = false)
     }
 
     // Record listened time for the outgoing track before switching
-    const prevTrack = get(currentTrack);
-    if (prevTrack) recordListened(prevTrack.id, get(position));
+    flushOutgoingTrackStats();
 
     await invoke('audio_play', { path: track.path, duration: track.duration });
     currentAlbum.set(album);
     currentTrack.set(track);
-    recordPlay(track.id);
+    _activeTrackId = track.id;
+    _activeTrackDuration = track.duration || 0;
+    _hasCountedPlay = false;
+    _currentHistoryId = null;
     duration.set(track.duration);
     position.set(0);
     isPlaying.set(true);
@@ -308,6 +367,7 @@ export async function resume() {
 }
 
 export async function stop() {
+  flushOutgoingTrackStats();
   await invoke('audio_stop');
   isPlaying.set(false);
   isPaused.set(false);
