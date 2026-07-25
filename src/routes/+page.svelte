@@ -128,25 +128,29 @@
   );
 
   const filteredAlbums = $derived(
-    searchOpen && searchQuery.trim()
-      ? (() => {
-          const q = searchQuery.trim().toLowerCase();
-          return $albums.filter(
-            (a) =>
-              a.title.toLowerCase().includes(q) ||
-              a.artist.toLowerCase().includes(q) ||
-              a.search_index?.toLowerCase().includes(q) ||
-              a.tracks.some(
-                (t) =>
-                  t.title.toLowerCase().includes(q) ||
-                  t.artist.toLowerCase().includes(q) ||
-                  t.search_index?.toLowerCase().includes(q),
-              ),
-          );
-        })()
-      : selectedArtistFilter
+    (() => {
+      let list = selectedArtistFilter
         ? $albums.filter((a) => a.artist === selectedArtistFilter)
-        : $albums,
+        : $albums;
+
+      if (searchOpen && searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        list = list.filter(
+          (a) =>
+            a.title.toLowerCase().includes(q) ||
+            a.artist.toLowerCase().includes(q) ||
+            a.search_index?.toLowerCase().includes(q) ||
+            a.tracks.some(
+              (t) =>
+                t.title.toLowerCase().includes(q) ||
+                t.artist.toLowerCase().includes(q) ||
+                t.search_index?.toLowerCase().includes(q),
+            ),
+        );
+      }
+
+      return list;
+    })(),
   );
 
   const filteredPlaylists = $derived(
@@ -917,6 +921,8 @@
               onselect={(artist) => {
                 playUiSfx("confirm");
                 selectedArtistFilter = artist.name;
+                searchOpen = false;
+                searchQuery = "";
                 activeTab = "library";
               }}
               onhover={(artist) => (hoveredArtist = artist)}
