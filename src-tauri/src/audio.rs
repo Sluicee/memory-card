@@ -162,7 +162,16 @@ impl AudioPlayer {
                                 st.play_started_at = Some(start);
                                 st.elapsed_before_pause = 0.0;
                             }
-                            Err(e) => eprintln!("[audio] Play failed: {e}"),
+                            Err(e) => {
+                                eprintln!("[audio] Play failed: {e}");
+                                let mut st = state_thread.lock().unwrap();
+                                st.is_playing = false;
+                                st.is_paused = false;
+                                st.current_path = Some(path);
+                                st.duration_secs = duration;
+                                st.play_started_at = None;
+                                st.elapsed_before_pause = 0.0;
+                            }
                         }
                     }
                     Cmd::Preload { _path: _ } => {
@@ -203,7 +212,16 @@ impl AudioPlayer {
                                 st.elapsed_before_pause = target;
                                 eprintln!("[audio] Seek to {}", target);
                             }
-                            Err(e) => eprintln!("[audio] Seek failed: {e}"),
+                            Err(e) => {
+                                eprintln!("[audio] Seek failed: {e}");
+                                let mut st = state_thread.lock().unwrap();
+                                st.is_playing = false;
+                                st.is_paused = false;
+                                st.current_path = Some(path);
+                                st.duration_secs = duration;
+                                st.play_started_at = None;
+                                st.elapsed_before_pause = 0.0;
+                            }
                         }
                     }
                     Cmd::Pause => {

@@ -19,6 +19,16 @@ pub struct FFmpegSource {
 
 impl FFmpegSource {
     pub fn new(app: &AppHandle, path: &str, seek_secs: f64) -> Result<Self, String> {
+        if path != "prewarm" {
+            let p = std::path::Path::new(path);
+            if !p.exists() {
+                return Err(format!("File does not exist: {}", path));
+            }
+            if !p.is_file() {
+                return Err(format!("Path is not a file: {}", path));
+            }
+        }
+
         let seek_str = format!("{:.3}", seek_secs);
 
         // Configure arguments
@@ -74,7 +84,7 @@ impl FFmpegSource {
 
         let mut child = std_command
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("Failed to spawn ffmpeg: {}", e))?;
 
@@ -122,8 +132,15 @@ impl FFmpegSource {
         // This ensures the audio thread has data immediately, preventing a "start-up click" or quick starvation.
         let mut attempts = 0;
         while consumer.slots() < 44100 && attempts < 150 {
+            if consumer.is_abandoned() {
+                break;
+            }
             std::thread::sleep(Duration::from_millis(5));
             attempts += 1;
+        }
+
+        if consumer.slots() == 0 && consumer.is_abandoned() {
+            return Err("Failed to decode any audio samples (file empty or unsupported format)".to_string());
         }
 
         Ok(Self {
