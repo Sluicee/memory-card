@@ -236,6 +236,7 @@
   });
 
   function handleGamepadAction(action: GamepadAction) {
+    if (!document.hasFocus()) return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
 

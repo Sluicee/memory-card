@@ -50,6 +50,14 @@ function fire(action: GamepadAction) {
 }
 
 function pollFrame(now: DOMHighResTimeStamp) {
+  if (!browser || !document.hasFocus()) {
+    prevPressed = [];
+    holdStart.clear();
+    lastRepeat.clear();
+    rafId = requestAnimationFrame(pollFrame);
+    return;
+  }
+
   const pads = navigator.getGamepads();
   const pad  = pads.find((p) => p !== null);
 
