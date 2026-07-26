@@ -37,25 +37,33 @@ function getInitialState() {
 export const sfxEnabled = writable(getInitialState());
 
 if (browser) {
-  sfxEnabled.subscribe(value => {
+  sfxEnabled.subscribe((value) => {
     localStorage.setItem(STORAGE_KEY, value.toString());
   });
 }
 
 let audioCtx: AudioContext | null = null;
-const bufferCache = new Map<UiSfxName, Promise<AudioBuffer | null>>();
+const decodedCache = new Map<UiSfxName, AudioBuffer>();
+const loadingPromises = new Map<UiSfxName, Promise<AudioBuffer | null>>();
 
 function getAudioContext(): AudioContext | null {
   if (!browser) return null;
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      // Request low-latency interactive audio context
+      audioCtx = new AudioCtx({ latencyHint: 'interactive' });
+    }
   }
   return audioCtx;
 }
 
 function loadSfxBuffer(name: UiSfxName): Promise<AudioBuffer | null> {
-  const cached = bufferCache.get(name);
-  if (cached) return cached;
+  if (decodedCache.has(name)) {
+    return Promise.resolve(decodedCache.get(name)!);
+  }
+  const cachedPromise = loadingPromises.get(name);
+  if (cachedPromise) return cachedPromise;
 
   const promise = (async () => {
     const ctx = getAudioContext();
@@ -64,26 +72,42 @@ function loadSfxBuffer(name: UiSfxName): Promise<AudioBuffer | null> {
     try {
       const res = await fetch(SOURCES[name]);
       const arrayBuffer = await res.arrayBuffer();
-      return await ctx.decodeAudioData(arrayBuffer);
+      const decoded = await ctx.decodeAudioData(arrayBuffer);
+      decodedCache.set(name, decoded);
+      return decoded;
     } catch (e) {
       console.error(`Failed to load/decode SFX ${name}:`, e);
-      bufferCache.delete(name);
+      loadingPromises.delete(name);
       return null;
     }
   })();
 
-  bufferCache.set(name, promise);
+  loadingPromises.set(name, promise);
   return promise;
 }
 
 export function primeUiSfx() {
   if (!browser) return;
+  // Initialize context eagerly
+  getAudioContext();
   for (const name of Object.keys(SOURCES) as UiSfxName[]) {
     void loadSfxBuffer(name);
   }
 }
 
-export async function playUiSfx(name: UiSfxName, volume = DEFAULT_VOLUMES[name]) {
+function playUiSfxDirect(ctx: AudioContext, buffer: AudioBuffer, volume: number) {
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = volume;
+
+  source.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  source.start(0);
+}
+
+export function playUiSfx(name: UiSfxName, volume = DEFAULT_VOLUMES[name]) {
   if (!get(sfxEnabled)) return;
   if (!browser) return;
 
@@ -91,22 +115,21 @@ export async function playUiSfx(name: UiSfxName, volume = DEFAULT_VOLUMES[name])
     const ctx = getAudioContext();
     if (!ctx) return;
 
+    // Unsuspend audio context without awaiting (non-blocking)
     if (ctx.state === 'suspended') {
-      await ctx.resume();
+      void ctx.resume();
     }
 
-    const buffer = await loadSfxBuffer(name);
-    if (!buffer) return;
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-
-    const gainNode = ctx.createGain();
-    gainNode.gain.value = volume;
-
-    source.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    source.start(0);
+    const buffer = decodedCache.get(name);
+    if (buffer) {
+      // Instant synchronous playback
+      playUiSfxDirect(ctx, buffer, volume);
+    } else {
+      // Fallback if buffer hasn't finished preloading yet
+      void loadSfxBuffer(name).then((buf) => {
+        if (buf) playUiSfxDirect(ctx, buf, volume);
+      });
+    }
   } catch (e) {
     console.error('Play sfx error:', e);
   }
