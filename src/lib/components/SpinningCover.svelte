@@ -16,9 +16,17 @@
 
   let container: HTMLDivElement;
   let renderer: THREE.WebGLRenderer;
-  let animId: number;
+  let animId: number = 0;
   let mesh: THREE.Mesh;
+  let scene: THREE.Scene;
+  let camera: THREE.PerspectiveCamera;
   let isSpinning = $derived(spin);
+
+  function renderSingleFrame() {
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+  }
 
   function loadTexture(texSrc: string) {
     if (!mesh) return;
@@ -42,7 +50,27 @@
       mats[4] = frontMat;
       mats[5] = backMat;
       mesh.material = [...mats];
+      renderSingleFrame();
     });
+  }
+
+  let lastTime = 0;
+  const RPM = 12;
+
+  function animate() {
+    if (!isSpinning) {
+      renderSingleFrame();
+      animId = 0;
+      return;
+    }
+    animId = requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = lastTime ? (now - lastTime) / 1000 : 0;
+    lastTime = now;
+    if (mesh) {
+      mesh.rotation.y += dt * RPM * Math.PI * 2 / 60;
+    }
+    renderSingleFrame();
   }
 
   // React to src changes after mount
@@ -50,18 +78,38 @@
     if (src && mesh) loadTexture(src);
   });
 
+  // React to spin state changes
+  $effect(() => {
+    if (isSpinning) {
+      if (!animId && renderer) {
+        lastTime = performance.now();
+        animate();
+      }
+    } else {
+      if (animId) {
+        cancelAnimationFrame(animId);
+        animId = 0;
+        renderSingleFrame();
+      }
+    }
+  });
+
   onMount(() => {
     const W = size, H = size;
     const DEPTH = Math.max(3, size * 0.022); // proportional thickness
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 1000);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 1000);
     camera.position.z = size * 2.15;
 
     const geo = new THREE.BoxGeometry(size * 0.77, size * 0.77, DEPTH);
@@ -85,24 +133,15 @@
     fill.position.set(-4, -2, 3);
     scene.add(fill);
 
-    const RPM = 12;
-    let lastTime = performance.now();
-
-    function animate() {
-      animId = requestAnimationFrame(animate);
-      const now = performance.now();
-      const dt = (now - lastTime) / 1000;
-      lastTime = now;
-      if (isSpinning) {
-        mesh.rotation.y += dt * RPM * Math.PI * 2 / 60;
-      }
-      renderer.render(scene, camera);
+    renderSingleFrame();
+    if (isSpinning) {
+      lastTime = performance.now();
+      animate();
     }
-    animate();
   });
 
   onDestroy(() => {
-    cancelAnimationFrame(animId);
+    if (animId) cancelAnimationFrame(animId);
     if (mesh) {
       mesh.geometry?.dispose();
       if (Array.isArray(mesh.material)) {
@@ -127,6 +166,6 @@
 
   .cover-wrap :global(canvas) {
     display: block;
-    filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.45));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   }
 </style>
