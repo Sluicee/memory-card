@@ -1,0 +1,71 @@
+name: "ci"
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  check:
+    name: Check & Verify Build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+
+      - name: install frontend dependencies
+        run: npm ci || npm install
+
+      - name: check Svelte & TypeScript types
+        run: npm run check
+
+      - name: setup sidecar ffmpeg
+        shell: bash
+        run: |
+          npm install --no-save ffmpeg-static
+          cat << 'EOF' > setup-sidecar.js
+          import fs from 'fs';
+          import { dirname, join } from 'path';
+          import ffmpegRaw from 'ffmpeg-static';
+          const ffmpeg = ffmpegRaw.default || ffmpegRaw;
+          
+          const platform = process.platform;
+          let target = '';
+          if (platform === 'darwin') target = 'aarch64-apple-darwin';
+          else if (platform === 'linux') target = 'x86_64-unknown-linux-gnu';
+          else target = 'x86_64-pc-windows-msvc';
+          
+          const ext = platform === 'win32' ? '.exe' : '';
+          const dest = join('src-tauri', 'binaries', `ffmpeg-${target}${ext}`);
+          
+          fs.mkdirSync(dirname(dest), { recursive: true });
+          try {
+            fs.unlinkSync(dest);
+          } catch (e) {}
+          console.log(`Copying FFmpeg to ${dest}`);
+          fs.copyFileSync(ffmpeg, dest);
+          EOF
+          node setup-sidecar.js
+
+      - name: check Rust code
+        working-directory: src-tauri
+        run: cargo check
+
+      - name: test frontend build
+        run: npm run build
