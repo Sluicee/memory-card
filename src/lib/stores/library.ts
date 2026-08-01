@@ -171,19 +171,14 @@ let scanLock: Promise<void> = Promise.resolve();
 export async function scanFolder(path: string) {
   scanLock = scanLock.then(async () => {
     const paths = get(folderPaths);
-    // Normalize for case-insensitive comparison (Windows)
-    const norm = (p: string) => p.replace(/[\\/]+$/, '').toLowerCase();
+    const norm = (p: string) => p.replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase();
     const normPath = norm(path);
-    // Skip if this exact path, or a parent of it, is already tracked
-    const alreadyCovered = paths.some(p => {
-      const np = norm(p);
-      return np === normPath || normPath.startsWith(np + '\\') || normPath.startsWith(np + '/');
-    });
-    if (alreadyCovered) return;
-
-    const next = [...paths, path];
-    folderPaths.set(next);
-    saveFolders(next);
+    const exists = paths.some(p => norm(p) === normPath);
+    if (!exists) {
+      const next = [...paths, path];
+      folderPaths.set(next);
+      saveFolders(next);
+    }
 
     isScanning.set(true);
     scanStatus.set({ filesScanned: 0, albumsFound: 0, totalFiles: 0 });

@@ -1,7 +1,7 @@
 use lofty::prelude::*;
 use any_ascii::any_ascii;
 use lofty::probe::Probe;
-use lofty::tag::ItemKey;
+use lofty::tag::{Accessor, ItemKey};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -68,35 +68,87 @@ struct TrackResult {
     cover: Option<(Vec<u8>, String)>,
 }
 
-/// Opens the audio file once and extracts track metadata.
+/// Opens the audio file and extracts track metadata with safe fallbacks.
 fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
     println!("Scanning: {}", path.display());
-    let tagged_file = Probe::open(path).ok()?.read().ok()?;
-    let duration = tagged_file.properties().duration().as_secs_f64();
     let path_str = path.to_string_lossy().to_string();
 
     let file_stem = path
         .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("Unknown")
-        .to_string();
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Unknown".to_string());
 
-    let tag = tagged_file.primary_tag();
+    let tagged_file_opt = Probe::open(path)
+        .and_then(|p| p.read())
+        .ok()
+        .or_else(|| {
+            let p = Probe::open(path).ok()?;
+            let p = p.guess_file_type().ok()?;
+            p.read().ok()
+        });
 
-    let title = tag
-        .and_then(|t| t.title().as_deref().map(String::from))
-        .unwrap_or(file_stem);
-    let artist = tag
-        .and_then(|t| t.artist().as_deref().map(String::from))
-        .unwrap_or_else(|| "Unknown Artist".to_string());
-    let album = tag
-        .and_then(|t| t.album().as_deref().map(String::from))
-        .unwrap_or_else(|| "Unknown Album".to_string());
-    let explicit_album_artist = tag.and_then(|t| t.get_string(&ItemKey::AlbumArtist).map(String::from));
+    let (title, artist, album, explicit_album_artist, track_number, disc_number, duration, year) = match tagged_file_opt {
+        Some(ref tagged_file) => {
+            let duration = tagged_file.properties().duration().as_secs_f64();
+            let tag = tagged_file.primary_tag();
+
+            let title = tag
+                .and_then(|t| t.title().as_deref().map(String::from))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| file_stem.clone());
+
+            let artist = tag
+                .and_then(|t| t.artist().as_deref().map(String::from))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Unknown Artist".to_string());
+
+            let album = tag
+                .and_then(|t| t.album().as_deref().map(String::from))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Unknown Album".to_string());
+
+fn get_tag_year(tag: &lofty::tag::Tag) -> Option<u32> {
+    if let Some(y) = tag.get_string(ItemKey::Year).and_then(|s| s.parse().ok()) {
+        return Some(y);
+    }
+    if let Some(d) = tag.get_string(ItemKey::RecordingDate) {
+        if d.len() >= 4 {
+            if let Ok(y) = d[..4].parse::<u32>() {
+                return Some(y);
+            }
+        }
+    }
+    None
+}
+
+            let explicit_album_artist = tag.and_then(|t| t.get_string(ItemKey::AlbumArtist).map(String::from));
+            let track_number = tag.and_then(|t| t.track()).unwrap_or(0);
+            let disc_number = tag.and_then(|t| t.disk()).unwrap_or(1);
+            let year = tag.and_then(get_tag_year);
+
+            (title, artist, album, explicit_album_artist, track_number, disc_number, duration, year)
+        }
+        None => {
+            // Fallback for files lofty failed to probe/read (e.g. corrupt ID3 tags, non-standard Mp3tag edits)
+            let title = file_stem.clone();
+            let artist = "Unknown Artist".to_string();
+            let album = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Unknown Album".to_string());
+            let explicit_album_artist = None;
+            let track_number = 0;
+            let disc_number = 1;
+            let duration = 0.0;
+            let year = None;
+
+            (title, artist, album, explicit_album_artist, track_number, disc_number, duration, year)
+        }
+    };
+
     let album_artist = explicit_album_artist.clone().unwrap_or_else(|| artist.clone());
-    let track_number = tag.and_then(|t| t.track()).unwrap_or(0);
-    let disc_number = tag.and_then(|t| t.disk()).unwrap_or(1);
-    let year = tag.and_then(|t| t.year());
 
     let search_index = format!(
         "{} {}",
@@ -176,7 +228,6 @@ fn save_embedded_cover(data: &[u8], mime: &str, album_id: &str, covers_dir: &Pat
     Some(dest.to_string_lossy().into_owned())
 }
 
-
 /// Copy a folder image, resizing to max 600px if needed.
 /// Folder art can be 3000+ px, so we decode and resize.
 fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option<String> {
@@ -199,17 +250,27 @@ fn copy_image_to_covers(src: &Path, album_id: &str, covers_dir: &Path) -> Option
 /// Strip "feat."/"ft."/"featuring" and everything after it from an artist string.
 /// Used for album key normalization so "Artist feat. Guest" groups with "Artist".
 fn strip_feat(artist: &str) -> &str {
-    let lower = artist.to_lowercase();
+    let trimmed = artist.trim();
+    let lower = trimmed.to_lowercase();
     let patterns = [" feat. ", " feat ", " ft. ", " ft ", " featuring ", " (feat.", " (ft."];
-    let mut min_idx = artist.len();
+    let mut min_char_idx = trimmed.chars().count();
+
     for pattern in patterns {
-        if let Some(idx) = lower.find(pattern) {
-            if idx < min_idx {
-                min_idx = idx;
+        if let Some(byte_idx) = lower.find(pattern) {
+            let char_idx = lower[..byte_idx].chars().count();
+            if char_idx < min_char_idx {
+                min_char_idx = char_idx;
             }
         }
     }
-    artist[..min_idx].trim()
+
+    let end_byte_idx = trimmed
+        .char_indices()
+        .nth(min_char_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(trimmed.len());
+
+    trimmed[..end_byte_idx].trim()
 }
 
 /// Strip disc-number suffix from album title for grouping purposes.
@@ -221,11 +282,13 @@ fn strip_disc_suffix(album: &str) -> &str {
     // Bracketed forms: (Disc N), [Disc N], (CD N), [CD N]
     for (open, close, keyword) in [('(', ')', "disc "), ('(', ')', "cd "), ('[', ']', "disc "), ('[', ']', "cd ")] {
         if lower.ends_with(close) {
-            if let Some(start) = lower.rfind(open) {
-                let inner = &lower[start + 1..lower.len() - 1];
+            if let Some(start_byte_idx) = lower.rfind(open) {
+                let inner = &lower[start_byte_idx + 1..lower.len() - 1];
                 if let Some(rest) = inner.strip_prefix(keyword) {
                     if !rest.is_empty() && rest.trim_start_matches(|c: char| c.is_ascii_digit()).is_empty() {
-                        return trimmed[..start].trim_end();
+                        let char_idx = lower[..start_byte_idx].chars().count();
+                        let end_byte_idx = trimmed.char_indices().nth(char_idx).map(|(idx, _)| idx).unwrap_or(trimmed.len());
+                        return trimmed[..end_byte_idx].trim_end();
                     }
                 }
             }
@@ -234,11 +297,13 @@ fn strip_disc_suffix(album: &str) -> &str {
 
     // Unbracketed forms at end: " Disc N", " CD N"
     for keyword in ["disc ", "cd "] {
-        if let Some(idx) = lower.rfind(keyword) {
-            let after = &lower[idx + keyword.len()..];
+        if let Some(idx_byte_idx) = lower.rfind(keyword) {
+            let after = &lower[idx_byte_idx + keyword.len()..];
             if !after.is_empty() && after.trim_start_matches(|c: char| c.is_ascii_digit()).is_empty() {
-                if idx == 0 || lower.as_bytes()[idx - 1] == b' ' {
-                    return trimmed[..idx].trim_end();
+                if idx_byte_idx == 0 || lower.as_bytes()[idx_byte_idx - 1] == b' ' {
+                    let char_idx = lower[..idx_byte_idx].chars().count();
+                    let end_byte_idx = trimmed.char_indices().nth(char_idx).map(|(idx, _)| idx).unwrap_or(trimmed.len());
+                    return trimmed[..end_byte_idx].trim_end();
                 }
             }
         }
