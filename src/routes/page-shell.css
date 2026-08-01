@@ -370,6 +370,8 @@
   box-shadow: var(--btn-shadow);
   backdrop-filter: blur(12px);
   max-width: 210px;
+  height: 42px;
+  box-sizing: border-box;
   overflow: hidden;
   transition:
     box-shadow 0.2s,
@@ -393,10 +395,12 @@
   gap: 7px;
   flex: 1;
   min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 6px 6px 6px 6px;
+  padding: 6px;
   transition: opacity 0.2s;
 }
 
@@ -429,8 +433,8 @@
 }
 
 .now-playing-art {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 4px;
   background: rgba(90, 95, 120, 0.15);
   flex-shrink: 0;
@@ -451,12 +455,18 @@
 .now-playing-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  justify-content: center;
+  gap: 1px;
   min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .track-name {
   font-size: 13px;
+  line-height: 1.2;
+  height: 16px;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -470,10 +480,13 @@
   max-width: 160px;
   white-space: nowrap;
   text-wrap: nowrap;
+  height: 14px;
+  line-height: 1.2;
 }
 
 .track-artist {
   font-size: 11px;
+  line-height: 1.2;
   color: var(--text-secondary);
   white-space: nowrap;
   text-wrap: nowrap;
