@@ -186,12 +186,93 @@ function flushOutgoingTrackStats() {
   _activeTrackDuration = 0;
 }
 
+async function handleTrackFinished() {
+  const finished = get(currentTrack);
+  if (finished) {
+    const dur = get(duration) || _activeTrackDuration || finished.duration || 0;
+    const currentPos = get(position);
+    const threshold = Math.max(10, dur * 0.25);
+    if (!_hasCountedPlay && currentPos >= threshold) {
+      _currentHistoryId = recordPlay(finished.id);
+      _hasCountedPlay = true;
+    }
+    if (_hasCountedPlay) {
+      recordListened(finished.id, dur, _currentHistoryId);
+    }
+  }
+  _currentHistoryId = null;
+  _hasCountedPlay = false;
+  _activeTrackId = null;
+  _activeTrackDuration = 0;
+
+  const rm = get(repeatMode);
+  if (rm === 'one') {
+    const track = get(currentTrack);
+    const album = get(currentAlbum);
+    if (track && album) await playTrack(track, album, _queue.length > 0);
+  } else if (_userQueue.length > 0) {
+    if (_queue.length === 0 && !_sourceReturnAlbum) {
+      _sourceReturnAlbum = get(currentAlbum);
+      _sourceReturnTrackId = get(currentTrack)?.id ?? null;
+      syncSourceReturn();
+    }
+    const next = _userQueue.shift()!;
+    syncUserQueue();
+    await playTrack(next.track, next.album, true);
+  } else if (_queue.length > 0) {
+    const next = _qIdx + 1;
+    if (next < _queue.length) {
+      _qIdx = next;
+      syncSourceQueue();
+      await playTrack(_queue[_qIdx].track, _queue[_qIdx].album, true);
+    } else if (rm === 'all') {
+      _qIdx = 0;
+      syncSourceQueue();
+      await playTrack(_queue[0].track, _queue[0].album, true);
+    } else {
+      _queue = [];
+      _qIdx = -1;
+      isShuffled.set(false);
+      currentPlaylistId.set(null);
+      syncSourceQueue();
+      await invoke('audio_stop');
+      isPlaying.set(false);
+      isPaused.set(false);
+      stopPolling();
+    }
+  } else {
+    const albumToUse = _sourceReturnAlbum ?? get(currentAlbum);
+    const trackIdToUse = _sourceReturnTrackId ?? get(currentTrack)?.id;
+    _sourceReturnAlbum = null;
+    _sourceReturnTrackId = null;
+    syncSourceReturn();
+    if (albumToUse) {
+      const idx = albumToUse.tracks.findIndex(t => t.id === trackIdToUse);
+      if (rm === 'all') {
+        const nextIdx = idx !== -1 ? (idx + 1) % albumToUse.tracks.length : 0;
+        await playTrack(albumToUse.tracks[nextIdx], albumToUse);
+      } else {
+        const next = idx !== -1 ? albumToUse.tracks[idx + 1] : null;
+        if (next) await playTrack(next, albumToUse);
+      }
+    }
+  }
+}
+
+listen<void>('audio:ended', async () => {
+  if (_advancing) return;
+  _advancing = true;
+  try {
+    await handleTrackFinished();
+  } finally {
+    _advancing = false;
+  }
+});
+
 function startPolling() {
   if (pollTimer) return;
   pollTimer = setInterval(async () => {
     if (!get(currentTrack)) return;
-    // Set _advancing = true synchronously before any await so that concurrent
-    // interval ticks can't both slip past the guard (TOCTOU race fix).
     if (_advancing) return;
     _advancing = true;
     try {
@@ -212,83 +293,7 @@ function startPolling() {
       }
 
       if (await invoke<boolean>('audio_is_finished')) {
-        const finished = get(currentTrack);
-        if (finished) {
-          const dur = get(duration) || _activeTrackDuration || finished.duration || 0;
-          const currentPos = get(position);
-          const threshold = Math.max(10, dur * 0.25);
-          if (!_hasCountedPlay && currentPos >= threshold) {
-            _currentHistoryId = recordPlay(finished.id);
-            _hasCountedPlay = true;
-          }
-          if (_hasCountedPlay) {
-            recordListened(finished.id, dur, _currentHistoryId);
-          }
-        }
-        _currentHistoryId = null;
-        _hasCountedPlay = false;
-        _activeTrackId = null;
-        _activeTrackDuration = 0;
-
-        const rm = get(repeatMode);
-        if (rm === 'one') {
-          const track = get(currentTrack);
-          const album = get(currentAlbum);
-          if (track && album) await playTrack(track, album, _queue.length > 0);
-        } else if (_userQueue.length > 0) {
-          // User queue plays before source resumes.
-          // Save where to return in the source album (only in album mode, first entry).
-          if (_queue.length === 0 && !_sourceReturnAlbum) {
-            _sourceReturnAlbum = get(currentAlbum);
-            _sourceReturnTrackId = get(currentTrack)?.id ?? null;
-            syncSourceReturn();
-          }
-          const next = _userQueue.shift()!;
-          syncUserQueue();
-          // Always fromShuffle=true so stopShuffle() doesn't wipe the source context.
-          await playTrack(next.track, next.album, true);
-        } else if (_queue.length > 0) {
-          const next = _qIdx + 1;
-          if (next < _queue.length) {
-            _qIdx = next;
-            syncSourceQueue();
-            await playTrack(_queue[_qIdx].track, _queue[_qIdx].album, true);
-          } else if (rm === 'all') {
-            _qIdx = 0;
-            syncSourceQueue();
-            await playTrack(_queue[0].track, _queue[0].album, true);
-          } else {
-            // Queue exhausted — stop cleanly, keep track info for display
-            _queue = [];
-            _qIdx = -1;
-            isShuffled.set(false);
-            currentPlaylistId.set(null);
-            syncSourceQueue();
-            await invoke('audio_stop');
-            isPlaying.set(false);
-            isPaused.set(false);
-            stopPolling();
-          }
-        } else {
-          // Album mode: use saved source context if returning from user queue,
-          // otherwise fall back to current album/track.
-          const albumToUse = _sourceReturnAlbum ?? get(currentAlbum);
-          const trackIdToUse = _sourceReturnTrackId ?? get(currentTrack)?.id;
-          _sourceReturnAlbum = null;
-          _sourceReturnTrackId = null;
-          syncSourceReturn();
-          if (albumToUse) {
-            const idx = albumToUse.tracks.findIndex(t => t.id === trackIdToUse);
-            if (rm === 'all') {
-              const nextIdx = idx !== -1 ? (idx + 1) % albumToUse.tracks.length : 0;
-              await playTrack(albumToUse.tracks[nextIdx], albumToUse);
-            } else {
-              const next = idx !== -1 ? albumToUse.tracks[idx + 1] : null;
-              if (next) await playTrack(next, albumToUse);
-              // else: end of album — stay silent, keep track info for display
-            }
-          }
-        }
+        await handleTrackFinished();
       }
     } finally {
       _advancing = false;

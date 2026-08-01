@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 enum Cmd {
     Play { path: String, duration: f64 },
@@ -130,6 +130,7 @@ impl AudioPlayer {
                                 if st.is_playing {
                                     st.is_playing = false;
                                     st.is_paused = false;
+                                    app_handle.emit("audio:ended", ()).ok();
                                 }
                             }
                         }
