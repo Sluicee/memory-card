@@ -44,8 +44,10 @@
     onOpenOptions: () => void;
   } = $props();
 
-  let containerWidth = $state(0);
-  let textWidth = $state(0);
+  let titleContainerWidth = $state(0);
+  let titleTextWidth = $state(0);
+  let artistContainerWidth = $state(0);
+  let artistTextWidth = $state(0);
 </script>
 
 <footer class="footer">
@@ -128,15 +130,21 @@
           {/if}
         </div>
         <div class="now-playing-info">
-          <span class="track-name"
-            >{$currentTrack?.title ?? $t("noTrackPlaying")}</span
-          >
-          <div class="artist-marquee" bind:clientWidth={containerWidth}>
+          <div class="title-marquee" bind:clientWidth={titleContainerWidth}>
+            <span
+              class="track-name"
+              bind:clientWidth={titleTextWidth}
+              class:animate={titleTextWidth > titleContainerWidth}
+              style="--scroll-dist: -{titleTextWidth - titleContainerWidth}px"
+              >{$currentTrack?.title ?? $t("noTrackPlaying")}</span
+            >
+          </div>
+          <div class="artist-marquee" bind:clientWidth={artistContainerWidth}>
             <span
               class="track-artist"
-              bind:clientWidth={textWidth}
-              class:animate={textWidth > containerWidth}
-              style="--scroll-dist: -{textWidth - containerWidth}px"
+              bind:clientWidth={artistTextWidth}
+              class:animate={artistTextWidth > artistContainerWidth}
+              style="--scroll-dist: -{artistTextWidth - artistContainerWidth}px"
               >{$currentTrack?.artist ?? "—"}</span
             >
           </div>

@@ -463,25 +463,32 @@
   overflow: hidden;
 }
 
-.track-name {
-  font-size: 13px;
-  line-height: 1.2;
-  height: 16px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-}
-
+.title-marquee,
 .artist-marquee {
   overflow: hidden;
   width: 100%;
   max-width: 160px;
   white-space: nowrap;
   text-wrap: nowrap;
+}
+
+.title-marquee {
+  height: 16px;
+  line-height: 1.2;
+}
+
+.artist-marquee {
   height: 14px;
   line-height: 1.2;
+}
+
+.track-name {
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-wrap: nowrap;
+  display: inline-block;
 }
 
 .track-artist {
@@ -493,10 +500,12 @@
   display: inline-block;
 }
 
+.track-name.animate,
 .track-artist.animate {
   animation: marquee-scroll 10s linear infinite alternate;
 }
 
+.track-name.animate:hover,
 .track-artist.animate:hover {
   animation-play-state: paused;
 }
