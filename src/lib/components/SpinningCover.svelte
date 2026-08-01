@@ -18,10 +18,7 @@
   let renderer: THREE.WebGLRenderer;
   let animId: number;
   let mesh: THREE.Mesh;
-  let isSpinning = $state(spin);
-
-  // Keep reactive to spin prop
-  $effect(() => { isSpinning = spin; });
+  let isSpinning = $derived(spin);
 
   function loadTexture(texSrc: string) {
     if (!mesh) return;
@@ -106,6 +103,17 @@
 
   onDestroy(() => {
     cancelAnimationFrame(animId);
+    if (mesh) {
+      mesh.geometry?.dispose();
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((m) => {
+          if (m instanceof THREE.MeshStandardMaterial) {
+            m.map?.dispose();
+          }
+          m.dispose();
+        });
+      }
+    }
     renderer?.dispose();
   });
 </script>
