@@ -3,6 +3,7 @@ name = "memory-card"
 version = "1.4.0"
 description = "A desktop music player with a retro PS2/CRT aesthetic"
 authors = ["Sluicee"]
+license = "GPL-3.0-or-later"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
