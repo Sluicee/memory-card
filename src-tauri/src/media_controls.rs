@@ -185,20 +185,29 @@ impl MediaControlsManager {
         self.update_discord();
 
         if let Some(controls) = self.controls.lock().unwrap().as_mut() {
-            // Copy cover to a temporary file in %TEMP% to ensure SMTC/Windows Widget 
-            // has permission to access it. Windows is notoriously picky about AppData files.
-            let temp_path_buf = std::env::temp_dir().join("musicplayer_smtc_cover.jpg");
-            let mut final_cover_url = cover_url;
+            // Copy cover to a hashed temporary file in %TEMP% to ensure SMTC/Windows Widget 
+            // has permission to access it without file locking conflicts during rapid track changes.
+            let mut temp_path_buf = None;
 
             if let Some(path) = cover_url {
-                let _ = std::fs::copy(path, &temp_path_buf);
-                final_cover_url = temp_path_buf.to_str();
+                let mut hash: u64 = 0xcbf29ce484222325;
+                for byte in path.bytes() {
+                    hash ^= byte as u64;
+                    hash = hash.wrapping_mul(0x100000001b3);
+                }
+                let temp_name = format!("musicplayer_smtc_{:016x}.jpg", hash);
+                let target = std::env::temp_dir().join(temp_name);
+                if target.exists() || std::fs::copy(path, &target).is_ok() {
+                    temp_path_buf = Some(target);
+                }
             }
+
+            let cover_str = temp_path_buf.as_ref().and_then(|p| p.to_str()).or(cover_url);
 
             let metadata = souvlaki::MediaMetadata {
                 title: Some(title),
                 artist: Some(artist),
-                cover_url: final_cover_url,
+                cover_url: cover_str,
                 duration: Some(std::time::Duration::from_millis(duration_ms)),
                 ..Default::default()
             };
