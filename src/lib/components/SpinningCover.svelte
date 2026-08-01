@@ -166,6 +166,6 @@
 
   .cover-wrap :global(canvas) {
     display: block;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.4));
   }
 </style>
