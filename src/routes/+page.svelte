@@ -140,7 +140,13 @@
         );
       }
 
-      return list;
+      return [...list].sort((a, b) => {
+        const artistCompare = (a.artist || "").localeCompare(b.artist || "", undefined, { sensitivity: "base" });
+        if (artistCompare !== 0) return artistCompare;
+        const yearCompare = (a.year || 0) - (b.year || 0);
+        if (yearCompare !== 0) return yearCompare;
+        return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+      });
     })(),
   );
 
@@ -220,8 +226,8 @@
 
     await loadCache();
 
-    const totalPages = Math.max(1, Math.ceil($albums.length / 12));
-    initialAlbumPage = Math.floor(Math.random() * totalPages);
+    const savedPage = parseInt(localStorage.getItem("mp_album_page") ?? "0", 10);
+    initialAlbumPage = isNaN(savedPage) || savedPage < 0 ? 0 : savedPage;
 
     checkForUpdates();
 
@@ -623,6 +629,10 @@
                 onselect={selectAlbum}
                 onhover={(a) => (hoveredAlbum = a)}
                 initialPage={initialAlbumPage}
+                onPageChange={(p) => {
+                  initialAlbumPage = p;
+                  localStorage.setItem("mp_album_page", p.toString());
+                }}
               />
             {/if}
           {/if}

@@ -13,11 +13,13 @@
     onselect,
     onhover,
     initialPage = 0,
+    onPageChange,
   }: {
     albums: Album[];
     onselect: (album: Album) => void;
     onhover: (album: Album | null) => void;
     initialPage?: number;
+    onPageChange?: (page: number) => void;
   } = $props();
 
   // virtualIndex layout: [last-clone=0] [page0=1] [page1=2] ... [pageN=N] [first-clone=N+1]
@@ -59,6 +61,12 @@
       initialPageSet = true;
     }
     prevLength = len;
+  });
+
+  $effect(() => {
+    if (initialPageSet) {
+      onPageChange?.(currentPage);
+    }
   });
 
   async function snapTo(newVirtual: number, newPage: number) {
