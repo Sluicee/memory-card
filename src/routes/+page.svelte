@@ -236,20 +236,7 @@
 
     await loadCache();
 
-    const savedPage = parseInt(localStorage.getItem("mp_album_page") ?? "0", 10);
-    initialAlbumPage = isNaN(savedPage) || savedPage < 0 ? 0 : savedPage;
-
-    window.addEventListener("beforeunload", () => {
-      try {
-        localStorage.setItem("mp_album_page", initialAlbumPage.toString());
-      } catch {}
-    });
-
-    getCurrentWindow().listen("tauri://close-requested", () => {
-      try {
-        localStorage.setItem("mp_album_page", initialAlbumPage.toString());
-      } catch {}
-    });
+    initialAlbumPage = 0;
 
     checkForUpdates();
 
