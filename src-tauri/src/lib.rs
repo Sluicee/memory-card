@@ -100,9 +100,9 @@ async fn scan_music_folder(path: String, app: tauri::AppHandle) -> Result<(), St
     .await
     .map_err(|e| e.to_string())?;
 
-    // Emit all albums immediately so the UI renders
-    for album in &albums {
-        app.emit("scan:album", album).ok();
+    // Emit all albums in batches of 50 so the UI renders smoothly
+    for chunk in albums.chunks(50) {
+        app.emit("scan:albums", chunk).ok();
     }
     app.emit("scan:done", ()).ok();
 
@@ -235,8 +235,8 @@ async fn load_library_cache(app: tauri::AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
-    for album in albums {
-        app.emit("scan:album", &album).ok();
+    for chunk in albums.chunks(50) {
+        app.emit("scan:albums", chunk).ok();
     }
     app.emit("scan:done", ()).ok();
 

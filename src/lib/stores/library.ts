@@ -44,6 +44,10 @@ export async function loadCache(): Promise<boolean> {
   return new Promise(async (resolve) => {
     const unlisten: Array<() => void> = [];
 
+    unlisten.push(await listen<Album[]>('scan:albums', (e) => {
+      albums.update((a) => [...a, ...e.payload]);
+    }));
+
     unlisten.push(await listen<Album>('scan:album', (e) => {
       albums.update((a) => [...a, e.payload]);
     }));
@@ -82,6 +86,22 @@ async function scanOne(path: string): Promise<void> {
       'scan:progress',
       (e) => scanStatus.update(s => ({ ...s, filesScanned: e.payload.files_scanned }))
     ));
+    unlisten.push(await listen<Album[]>('scan:albums', (e) => {
+      albumsFound += e.payload.length;
+      scanStatus.update(s => ({ ...s, albumsFound }));
+      albums.update((a) => {
+        const copy = [...a];
+        for (const item of e.payload) {
+          const idx = copy.findIndex(x => x.id === item.id);
+          if (idx >= 0) {
+            copy[idx] = item;
+          } else {
+            copy.push(item);
+          }
+        }
+        return copy;
+      });
+    }));
     unlisten.push(await listen<Album>('scan:album', (e) => {
       albumsFound++;
       scanStatus.update(s => ({ ...s, albumsFound }));
