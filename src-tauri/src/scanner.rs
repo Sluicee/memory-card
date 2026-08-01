@@ -68,46 +68,6 @@ struct TrackResult {
     cover: Option<(Vec<u8>, String)>,
 }
 
-/// Opens the audio file and extracts track metadata with safe fallbacks.
-fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
-    println!("Scanning: {}", path.display());
-    let path_str = path.to_string_lossy().to_string();
-
-    let file_stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    let tagged_file_opt = Probe::open(path)
-        .and_then(|p| p.read())
-        .ok()
-        .or_else(|| {
-            let p = Probe::open(path).ok()?;
-            let p = p.guess_file_type().ok()?;
-            p.read().ok()
-        });
-
-    let (title, artist, album, explicit_album_artist, track_number, disc_number, duration, year) = match tagged_file_opt {
-        Some(ref tagged_file) => {
-            let duration = tagged_file.properties().duration().as_secs_f64();
-            let tag = tagged_file.primary_tag();
-
-            let title = tag
-                .and_then(|t| t.title().as_deref().map(String::from))
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| file_stem.clone());
-
-            let artist = tag
-                .and_then(|t| t.artist().as_deref().map(String::from))
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| "Unknown Artist".to_string());
-
-            let album = tag
-                .and_then(|t| t.album().as_deref().map(String::from))
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| "Unknown Album".to_string());
-
 fn get_tag_year(tag: &lofty::tag::Tag) -> Option<u32> {
     if let Some(y) = tag.get_string(ItemKey::Year).and_then(|s| s.parse().ok()) {
         return Some(y);
@@ -122,6 +82,92 @@ fn get_tag_year(tag: &lofty::tag::Tag) -> Option<u32> {
     None
 }
 
+/// Fallback duration calculator using symphonia when lofty metadata parsing fails or duration is 0
+fn get_audio_duration_fallback(path: &Path) -> f64 {
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let Ok(file) = std::fs::File::open(path) else { return 0.0 };
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    if let Ok(probed) = symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()) {
+        if let Some(track) = probed.format.tracks().first() {
+            let tb = track.codec_params.time_base;
+            let n_frames = track.codec_params.n_frames;
+            if let (Some(tb), Some(n_frames)) = (tb, n_frames) {
+                let time = tb.calc_time(n_frames);
+                return time.seconds as f64 + time.frac;
+            }
+        }
+    }
+    0.0
+}
+
+/// Opens the audio file and extracts track metadata with safe fallbacks.
+fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
+    println!("Scanning: {}", path.display());
+    let path_str = path.to_string_lossy().to_string();
+
+    let file_stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let tagged_file_opt = Probe::open(path)
+        .ok()
+        .and_then(|p| {
+            p.options(lofty::config::ParseOptions::new().parsing_mode(lofty::config::ParsingMode::Relaxed))
+                .guess_file_type()
+                .ok()?
+                .read()
+                .ok()
+        })
+        .or_else(|| {
+            Probe::open(path).ok().and_then(|p| p.read().ok())
+        });
+
+    let (title, artist, album, explicit_album_artist, track_number, disc_number, duration, year) = match tagged_file_opt {
+        Some(ref tagged_file) => {
+            let mut duration = tagged_file.properties().duration().as_secs_f64();
+            if duration <= 0.0 {
+                duration = get_audio_duration_fallback(path);
+            }
+            let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
+
+            let title = tag
+                .and_then(|t| t.title().as_deref().map(String::from))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| {
+                    if let Some((_, t)) = file_stem.split_once(" - ") {
+                        t.trim().to_string()
+                    } else {
+                        file_stem.clone()
+                    }
+                });
+
+            let artist = tag
+                .and_then(|t| t.artist().as_deref().map(String::from))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| {
+                    if let Some((a, _)) = file_stem.split_once(" - ") {
+                        a.trim().to_string()
+                    } else {
+                        "Unknown Artist".to_string()
+                    }
+                });
+
+            let album = tag
+                .and_then(|t| t.album().as_deref().map(String::from))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Unknown Album".to_string());
+
             let explicit_album_artist = tag.and_then(|t| t.get_string(ItemKey::AlbumArtist).map(String::from));
             let track_number = tag.and_then(|t| t.track()).unwrap_or(0);
             let disc_number = tag.and_then(|t| t.disk()).unwrap_or(1);
@@ -131,8 +177,11 @@ fn get_tag_year(tag: &lofty::tag::Tag) -> Option<u32> {
         }
         None => {
             // Fallback for files lofty failed to probe/read (e.g. corrupt ID3 tags, non-standard Mp3tag edits)
-            let title = file_stem.clone();
-            let artist = "Unknown Artist".to_string();
+            let (artist, title) = if let Some((a, t)) = file_stem.split_once(" - ") {
+                (a.trim().to_string(), t.trim().to_string())
+            } else {
+                ("Unknown Artist".to_string(), file_stem.clone())
+            };
             let album = path
                 .parent()
                 .and_then(|p| p.file_name())
@@ -141,7 +190,7 @@ fn get_tag_year(tag: &lofty::tag::Tag) -> Option<u32> {
             let explicit_album_artist = None;
             let track_number = 0;
             let disc_number = 1;
-            let duration = 0.0;
+            let duration = get_audio_duration_fallback(path);
             let year = None;
 
             (title, artist, album, explicit_album_artist, track_number, disc_number, duration, year)
