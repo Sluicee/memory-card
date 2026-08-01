@@ -132,10 +132,26 @@
     { label: $t('clearLibrary'),  action: clear      },
   ]);
 
+  import { sortMode, cycleSortMode } from '$lib/stores/sortMode';
+
   const rightItems = $derived([
     { label: $t('sfx', $sfxEnabled),              action: toggleSfx       },
     { label: $t('autostart', autostartEnabled),   action: toggleAutostart },
     { label: $t('discordRpc', discordRpcEnabled), action: toggleDiscordRpc },
+    {
+      label: $t(
+        'sortLabel',
+        $sortMode === 'artist'
+          ? $t('sortByArtist')
+          : $sortMode === 'title'
+            ? $t('sortByTitle')
+            : $t('sortByYear')
+      ),
+      action: () => {
+        playUiSfx('confirm');
+        cycleSortMode();
+      },
+    },
     { label: $t('switchLanguage'),                action: () => { playUiSfx('confirm'); toggleLocale(); } },
   ]);
 

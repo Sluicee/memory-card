@@ -63,16 +63,17 @@
     prevLength = len;
   });
 
-  $effect(() => {
+  function updatePage(newPage: number) {
+    currentPage = newPage;
     if (initialPageSet) {
-      onPageChange?.(currentPage);
+      onPageChange?.(newPage);
     }
-  });
+  }
 
   async function snapTo(newVirtual: number, newPage: number) {
     noTransition = true;
     virtualIndex = newVirtual;
-    currentPage = newPage;
+    updatePage(newPage);
     await tick();
     // Brief delay so browser applies no-transition before we re-enable
     setTimeout(() => {
@@ -86,10 +87,10 @@
     virtualIndex = next;
     if (next > totalPages) {
       // Landed on first-page clone — animate there, then snap to real first page
-      currentPage = 0;
+      updatePage(0);
       setTimeout(() => snapTo(1, 0), 370);
     } else {
-      currentPage = next - 1;
+      updatePage(next - 1);
     }
   }
 
@@ -99,10 +100,10 @@
     virtualIndex = prev;
     if (prev < 1) {
       // Landed on last-page clone — animate there, then snap to real last page
-      currentPage = totalPages - 1;
+      updatePage(totalPages - 1);
       setTimeout(() => snapTo(totalPages, totalPages - 1), 370);
     } else {
-      currentPage = prev - 1;
+      updatePage(prev - 1);
     }
   }
 

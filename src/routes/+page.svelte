@@ -45,6 +45,8 @@
     loadLastTrack,
     stepVolume,
   } from "$lib/stores/player";
+  import { recordListened } from "$lib/stores/stats";
+  import { sortMode } from "$lib/stores/sortMode";
   import { checkForUpdates } from "$lib/stores/updates";
   import { t } from "$lib/stores/i18n";
   import {
@@ -141,6 +143,14 @@
       }
 
       return [...list].sort((a, b) => {
+        if ($sortMode === "title") {
+          return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+        }
+        if ($sortMode === "year") {
+          const yDiff = (b.year || 0) - (a.year || 0);
+          if (yDiff !== 0) return yDiff;
+          return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+        }
         const artistCompare = (a.artist || "").localeCompare(b.artist || "", undefined, { sensitivity: "base" });
         if (artistCompare !== 0) return artistCompare;
         const yearCompare = (a.year || 0) - (b.year || 0);
@@ -228,6 +238,18 @@
 
     const savedPage = parseInt(localStorage.getItem("mp_album_page") ?? "0", 10);
     initialAlbumPage = isNaN(savedPage) || savedPage < 0 ? 0 : savedPage;
+
+    window.addEventListener("beforeunload", () => {
+      try {
+        localStorage.setItem("mp_album_page", initialAlbumPage.toString());
+      } catch {}
+    });
+
+    getCurrentWindow().listen("tauri://close-requested", () => {
+      try {
+        localStorage.setItem("mp_album_page", initialAlbumPage.toString());
+      } catch {}
+    });
 
     checkForUpdates();
 
