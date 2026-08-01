@@ -23,19 +23,21 @@
   // ── Source section ────────────────────────────────────────────────────────
   // While user queue is playing, $currentAlbum changes to the user queue track's album.
   // Use $sourceReturnContext to show the correct "next from album" tracks instead.
+  const MAX_SOURCE_ITEMS = 100;
+
   const sourceItems = $derived.by(() => {
     if ($sourceQueueItems.length > 0) {
-      return $sourceQueueItems.slice($sourceQueueIndex + 1);
+      return $sourceQueueItems.slice($sourceQueueIndex + 1, $sourceQueueIndex + 1 + MAX_SOURCE_ITEMS);
     }
     const ctx = $sourceReturnContext;
     if (ctx) {
       const idx = ctx.album.tracks.findIndex(t => t.id === ctx.trackId);
-      if (idx !== -1) return ctx.album.tracks.slice(idx + 1).map(t => ({ track: t, album: ctx.album }));
+      if (idx !== -1) return ctx.album.tracks.slice(idx + 1, idx + 1 + MAX_SOURCE_ITEMS).map(t => ({ track: t, album: ctx.album }));
     }
     if ($currentAlbum && $currentTrack) {
       const idx = $currentAlbum.tracks.findIndex(t => t.id === $currentTrack!.id);
       if (idx !== -1) {
-        return $currentAlbum.tracks.slice(idx + 1).map(t => ({ track: t, album: $currentAlbum! }));
+        return $currentAlbum.tracks.slice(idx + 1, idx + 1 + MAX_SOURCE_ITEMS).map(t => ({ track: t, album: $currentAlbum! }));
       }
     }
     return [];
