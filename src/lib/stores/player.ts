@@ -6,8 +6,10 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Track, Album } from '../types';
 import { recordPlay, recordListened } from './stats';
 
-const VOL_KEY   = 'mp_volume';
-const TRACK_KEY = 'mp_last_track';
+const VOL_KEY          = 'mp_volume';
+const TRACK_KEY        = 'mp_last_track';
+const USER_QUEUE_KEY   = 'mp_user_queue';
+const SOURCE_QUEUE_KEY = 'mp_source_queue';
 
 function loadVolume(): number {
   const v = parseFloat(localStorage.getItem(VOL_KEY) ?? '');
@@ -27,10 +29,45 @@ function saveLastTrack(track: Track | null, album: Album | null) {
 }
 
 export function loadLastTrack(): { track: Track; album: Album } | null {
+  loadSavedQueues();
   try {
     const raw = localStorage.getItem(TRACK_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
+}
+
+function saveQueues() {
+  try {
+    localStorage.setItem(USER_QUEUE_KEY, JSON.stringify(_userQueue));
+    localStorage.setItem(SOURCE_QUEUE_KEY, JSON.stringify({
+      queue: _queue,
+      qIdx: _qIdx,
+      isShuffled: get(isShuffled),
+      currentPlaylistId: get(currentPlaylistId),
+    }));
+  } catch {}
+}
+
+export function loadSavedQueues() {
+  try {
+    const rawUser = localStorage.getItem(USER_QUEUE_KEY);
+    if (rawUser) {
+      _userQueue = JSON.parse(rawUser);
+      userQueueItems.set([..._userQueue]);
+    }
+    const rawSource = localStorage.getItem(SOURCE_QUEUE_KEY);
+    if (rawSource) {
+      const data = JSON.parse(rawSource);
+      if (Array.isArray(data.queue)) {
+        _queue = data.queue;
+        _qIdx = typeof data.qIdx === 'number' ? data.qIdx : -1;
+        isShuffled.set(Boolean(data.isShuffled));
+        currentPlaylistId.set(data.currentPlaylistId ?? null);
+        sourceQueueItems.set([..._queue]);
+        sourceQueueIndex.set(_qIdx);
+      }
+    }
+  } catch {}
 }
 
 // ── Stores ────────────────────────────────────────────────────────────────────
@@ -149,10 +186,12 @@ function fisherYates<T>(arr: T[]): T[] {
 function syncSourceQueue() {
   sourceQueueItems.set([..._queue]);
   sourceQueueIndex.set(_qIdx);
+  saveQueues();
 }
 
 function syncUserQueue() {
   userQueueItems.set([..._userQueue]);
+  saveQueues();
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
