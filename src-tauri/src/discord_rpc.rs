@@ -1,4 +1,4 @@
-use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+use discord_rich_presence::{activity, activity::ActivityType, DiscordIpc, DiscordIpcClient};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
@@ -170,6 +170,7 @@ impl DiscordManager {
                                     .start(start as i64)
                                     .end(end as i64);
                                 let payload = activity::Activity::new()
+                                    .activity_type(ActivityType::Listening)
                                     .state(&p.artist)
                                     .details(&p.title)
                                     .assets(assets)
@@ -211,6 +212,7 @@ impl DiscordManager {
                                         .start(start2 as i64)
                                         .end(end2 as i64);
                                     let payload = activity::Activity::new()
+                                        .activity_type(ActivityType::Listening)
                                         .state(&p.artist)
                                         .details(&p.title)
                                         .assets(assets)
