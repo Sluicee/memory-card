@@ -53,6 +53,17 @@ impl DiscordManager {
             // (title, album, is_playing, image_url_sent, sent_at)
             let mut last_sent: Option<(String, String, bool, String, Instant)> = None;
 
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .ok();
+
+            let req_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_default();
+
             loop {
                 if wake_rx.recv().is_err() {
                     break;
@@ -71,7 +82,7 @@ impl DiscordManager {
                             .as_secs();
                         let start = now.saturating_sub(p.position_ms / 1000);
 
-                        // Resolve artwork — non-blocking; background thread does the fetch.
+                        // Resolve artwork — non-blocking; background task does the fetch.
                         let mut image_url = "icon".to_string();
                         if p.is_playing && !p.album.is_empty() {
                             let cache_key = format!("{}|{}", p.artist, p.album);
@@ -96,32 +107,24 @@ impl DiscordManager {
                                         let artist = p.artist.clone();
                                         let album_name = p.album.clone();
                                         let wake = wake_tx_clone.clone();
-                                        thread::spawn(move || {
-                                            let rt = tokio::runtime::Builder::new_current_thread()
-                                                .enable_all()
-                                                .build()
-                                                .unwrap();
-                                            let url = rt
-                                                .block_on(async {
-                                                    let req_client = reqwest::Client::builder()
-                                                        .timeout(Duration::from_secs(10))
-                                                        .build()
-                                                        .unwrap_or_default();
-                                                    fetch_artwork(&req_client, &artist, &album_name).await
-                                                });
-                                            pending_arc.lock().unwrap().remove(&cache_key);
-                                            match url {
-                                                Some(u) => {
-                                                    cache_arc.lock().unwrap().insert(cache_key, u);
-                                                    let _ = wake.send(());
+                                        let client_clone = req_client.clone();
+                                        if let Some(ref runtime) = rt {
+                                            runtime.spawn(async move {
+                                                let url = fetch_artwork(&client_clone, &artist, &album_name).await;
+                                                pending_arc.lock().unwrap().remove(&cache_key);
+                                                match url {
+                                                    Some(u) => {
+                                                        cache_arc.lock().unwrap().insert(cache_key, u);
+                                                        let _ = wake.send(());
+                                                    }
+                                                    None => {
+                                                        // Store empty string = "checked, not found".
+                                                        // Prevents infinite retries for albums not on iTunes/MusicBrainz.
+                                                        cache_arc.lock().unwrap().insert(cache_key, String::new());
+                                                    }
                                                 }
-                                                None => {
-                                                    // Store empty string = "checked, not found".
-                                                    // Prevents infinite retries for albums not on iTunes/MusicBrainz.
-                                                    cache_arc.lock().unwrap().insert(cache_key, String::new());
-                                                }
-                                            }
-                                        });
+                                            });
+                                        }
                                     }
                                 }
                             }
