@@ -67,7 +67,7 @@ fn build_sink(
     seek_secs: f64,
 ) -> Result<Sink, String> {
     let source =
-        FFmpegSource::new(app_handle, path, seek_secs)?.fade_in(Duration::from_millis(100)); // Smooth start
+        FFmpegSource::new(app_handle, path, seek_secs)?.fade_in(Duration::from_millis(40)); // Smooth start
     let sink = Sink::try_new(handle).map_err(|e| e.to_string())?;
     sink.set_volume(volume);
     sink.append(source);
@@ -76,21 +76,15 @@ fn build_sink(
 
 fn gently_stop(sink: Option<Sink>) {
     if let Some(s) = sink {
-        // No audio to fade: stop synchronously to avoid spawning a useless thread.
-        if s.empty() || s.is_paused() {
-            s.stop();
-            return;
-        }
-        // Spawn a thread to fade out the old sink to avoid the "pop"
-        std::thread::spawn(move || {
+        if !s.empty() {
             let start_vol = s.volume();
-            let steps = 20;
+            let steps = 5;
             for i in (0..steps).rev() {
                 s.set_volume(start_vol * (i as f32 / steps as f32));
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(Duration::from_millis(3));
             }
-            s.stop();
-        });
+        }
+        s.stop();
     }
 }
 
