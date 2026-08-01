@@ -185,7 +185,7 @@ impl MediaControlsManager {
         self.update_discord();
 
         if let Some(controls) = self.controls.lock().unwrap().as_mut() {
-            // Copy cover to a hashed temporary file in %TEMP% to ensure SMTC/Windows Widget 
+            // Copy cover to a hashed temporary file in temp_dir to ensure SMTC/MPRIS 
             // has permission to access it without file locking conflicts during rapid track changes.
             let mut temp_path_buf = None;
 
@@ -204,10 +204,20 @@ impl MediaControlsManager {
 
             let cover_str = temp_path_buf.as_ref().and_then(|p| p.to_str()).or(cover_url);
 
+            let cover_url_formatted = cover_str.map(|p| {
+                if p.starts_with("http://") || p.starts_with("https://") || p.starts_with("file://") {
+                    p.to_string()
+                } else if p.starts_with('/') {
+                    format!("file://{}", p)
+                } else {
+                    p.to_string()
+                }
+            });
+
             let metadata = souvlaki::MediaMetadata {
                 title: Some(title),
                 artist: Some(artist),
-                cover_url: cover_str,
+                cover_url: cover_url_formatted.as_deref(),
                 duration: Some(std::time::Duration::from_millis(duration_ms)),
                 ..Default::default()
             };
