@@ -1,0 +1,60 @@
+name: "publish-aur"
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  aur:
+    name: Publish to AUR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+      - name: Clone AUR package repository
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          git clone ssh://aur@aur.archlinux.org/memory-card-bin.git aur-repo
+
+      - name: Download release asset & update AUR package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          VERSION="${TAG_NAME#v}"
+          echo "Updating AUR package for published release $TAG_NAME (version: $VERSION)"
+
+          # Download the built .deb package from the published release
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --pattern "*.deb" --dir /tmp/deb
+          DEB_FILE=$(ls /tmp/deb/*.deb | head -n 1)
+          SHA256=$(sha256sum "$DEB_FILE" | awk '{print $1}')
+          echo "Calculated SHA256: $SHA256"
+
+          cd aur-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Update PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/sha256sums=.*/sha256sums=('$SHA256')/" PKGBUILD
+
+          # Update .SRCINFO
+          sed -i "s/pkgver = .*/pkgver = $VERSION/" .SRCINFO
+          sed -i "s/memory-card-bin-.*\.deb/memory-card-bin-$VERSION.deb/" .SRCINFO
+          sed -i "s|v.*/Memory.Card_.*_amd64.deb|v$VERSION/Memory.Card_${VERSION}_amd64.deb|" .SRCINFO
+          sed -i "s/sha256sums = .*/sha256sums = $SHA256/" .SRCINFO
+
+          git add PKGBUILD .SRCINFO
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update to $VERSION"
+            git push origin master
+          fi
