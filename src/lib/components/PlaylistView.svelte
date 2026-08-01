@@ -62,13 +62,13 @@
   })());
 
   // Tint from cover
-  let tintColor = $state('rgba(120, 120, 140, 0.28)');
+  let tintColor = $state('rgba(120, 120, 140, 0.25)');
 
   $effect(() => {
     if (activeCoverSrc) {
       extractDominantColor(activeCoverSrc).then((c) => (tintColor = c));
     } else {
-      tintColor = 'rgba(120, 120, 140, 0.28)';
+      tintColor = 'rgba(120, 120, 140, 0.25)';
     }
   });
 
@@ -89,9 +89,9 @@
       for (let i = 0; i < data.length; i += 4) {
         r += data[i]; g += data[i + 1]; b += data[i + 2];
       }
-      return `rgba(${Math.round(r / px)}, ${Math.round(g / px)}, ${Math.round(b / px)}, 0.5)`;
+      return `rgba(${Math.round(r / px)}, ${Math.round(g / px)}, ${Math.round(b / px)}, 0.4)`;
     } catch {
-      return 'rgba(120, 120, 140, 0.28)';
+      return 'rgba(120, 120, 140, 0.25)';
     }
   }
 

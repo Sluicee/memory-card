@@ -349,6 +349,13 @@
   padding: 4px 0 2px;
 }
 
+.footer-top.is-hidden,
+.actions.is-hidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .footer-bottom {
   display: flex;
   align-items: center;
