@@ -19,6 +19,9 @@
   import Header from "$lib/components/Header.svelte";
   import TabNav from "$lib/components/TabNav.svelte";
   import FooterTransport from "$lib/components/FooterTransport.svelte";
+  import EqualizerPanel from "$lib/components/EqualizerPanel.svelte";
+  import type EqualizerPanelType from "$lib/components/EqualizerPanel.svelte";
+  import { isEqualizerOpen } from "$lib/stores/equalizer";
 
   import { viewMode } from "$lib/stores/viewMode";
   import { playUiSfx, primeUiSfx } from "$lib/ui-sfx";
@@ -250,10 +253,17 @@
     setupDragAndDrop((over) => (isDragOver = over));
   });
 
+  let equalizerPanel = $state<EqualizerPanelType | null>(null);
+
   function handleGamepadAction(action: GamepadAction) {
     if (!document.hasFocus()) return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+    if ($isEqualizerOpen) {
+      equalizerPanel?.handleGamepadInput(action);
+      return;
+    }
 
     if (optionsOpen) {
       handleGamepadOptions(action);
@@ -746,6 +756,10 @@
 
     {#if statsOpen}
       <StatsView albums={$albums} onclose={() => (statsOpen = false)} />
+    {/if}
+
+    {#if $isEqualizerOpen}
+      <EqualizerPanel bind:this={equalizerPanel} />
     {/if}
 
     {#if $viewMode === "focus" || $viewMode === "fullscreen"}

@@ -27,3 +27,17 @@ export interface Artist {
   name: string;
   albums: Album[];
 }
+
+export interface EqualizerSettings {
+  enabled: boolean;
+  preamp: number;
+  gains: number[];
+}
+
+export interface EqualizerPreset {
+  id: string;
+  name: string;
+  preamp: number;
+  gains: number[];
+}
+

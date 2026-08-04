@@ -6,6 +6,23 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct EqualizerSettings {
+    pub enabled: bool,
+    pub preamp: f32,
+    pub gains: Vec<f32>,
+}
+
+impl Default for EqualizerSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            preamp: 0.0,
+            gains: vec![0.0; 10],
+        }
+    }
+}
+
 enum Cmd {
     Play { path: String, duration: f64 },
     Preload { _path: String },
@@ -14,6 +31,7 @@ enum Cmd {
     Resume,
     Stop,
     SetVolume(f32),
+    SetEqualizer(EqualizerSettings),
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +43,7 @@ struct Inner {
     volume: f32,
     play_started_at: Option<Instant>,
     elapsed_before_pause: f64,
+    equalizer: EqualizerSettings,
 }
 
 impl Inner {
@@ -37,6 +56,7 @@ impl Inner {
             volume: 1.0,
             play_started_at: None,
             elapsed_before_pause: 0.0,
+            equalizer: EqualizerSettings::default(),
         }
     }
 
@@ -65,9 +85,10 @@ fn build_sink(
     path: &str,
     volume: f32,
     seek_secs: f64,
+    eq: &EqualizerSettings,
 ) -> Result<Sink, String> {
     let source =
-        FFmpegSource::new(app_handle, path, seek_secs)?.fade_in(Duration::from_millis(40)); // Smooth start
+        FFmpegSource::new(app_handle, path, seek_secs, eq)?.fade_in(Duration::from_millis(40)); // Smooth start
     let sink = Sink::try_new(handle).map_err(|e| e.to_string())?;
     sink.set_volume(volume);
     sink.append(source);
@@ -109,7 +130,8 @@ impl AudioPlayer {
             let ah = app_handle.clone();
             let h = handle.clone();
             std::thread::spawn(move || {
-                let _ = build_sink(&ah, &h, "prewarm", 0.0, 0.0);
+                let default_eq = EqualizerSettings::default();
+                let _ = build_sink(&ah, &h, "prewarm", 0.0, 0.0, &default_eq);
             });
 
             let mut sink: Option<Sink> = None;
@@ -140,12 +162,15 @@ impl AudioPlayer {
                         eprintln!("[audio] Play: {path}");
                         gently_stop(sink.take()); // Fade out old track immediately
 
-                        let volume = state_thread.lock().unwrap().volume;
+                        let (volume, eq) = {
+                            let st = state_thread.lock().unwrap();
+                            (st.volume, st.equalizer.clone())
+                        };
                         // Capture time before build_sink so that the position timer
                         // accounts for FFmpeg startup and preroll (~20-250ms).
                         let start = Instant::now();
 
-                        match build_sink(&app_handle, &handle, &path, volume, 0.0) {
+                        match build_sink(&app_handle, &handle, &path, volume, 0.0, &eq) {
                             Ok(new_sink) => {
                                 sink = Some(new_sink);
 
@@ -175,12 +200,13 @@ impl AudioPlayer {
                     Cmd::Seek { position } => {
                         gently_stop(sink.take()); // Fade out current track immediately
 
-                        let (path, duration, volume, was_paused) = {
+                        let (path, duration, volume, eq, was_paused) = {
                             let st = state_thread.lock().unwrap();
                             (
                                 st.current_path.clone(),
                                 st.duration_secs,
                                 st.volume,
+                                st.equalizer.clone(),
                                 st.is_paused,
                             )
                         };
@@ -190,7 +216,7 @@ impl AudioPlayer {
                         // Capture time before build so the timer accounts for preroll.
                         let start = Instant::now();
 
-                        match build_sink(&app_handle, &handle, &path, volume, target) {
+                        match build_sink(&app_handle, &handle, &path, volume, target, &eq) {
                             Ok(new_sink) => {
                                 if was_paused {
                                     new_sink.pause();
@@ -265,6 +291,54 @@ impl AudioPlayer {
                         }
                         state_thread.lock().unwrap().volume = clamped;
                     }
+                    Cmd::SetEqualizer(new_eq) => {
+                        let (path, _duration, volume, was_playing, was_paused, current_pos, old_eq) = {
+                            let st = state_thread.lock().unwrap();
+                            (
+                                st.current_path.clone(),
+                                st.duration_secs,
+                                st.volume,
+                                st.is_playing,
+                                st.is_paused,
+                                st.position(),
+                                st.equalizer.clone(),
+                            )
+                        };
+
+                        if old_eq == new_eq {
+                            continue;
+                        }
+
+                        {
+                            let mut st = state_thread.lock().unwrap();
+                            st.equalizer = new_eq.clone();
+                        }
+
+                        if (was_playing || was_paused) && path.is_some() {
+                            let path = path.unwrap();
+                            let start = Instant::now();
+                            match build_sink(&app_handle, &handle, &path, volume, current_pos, &new_eq) {
+                                Ok(new_sink) => {
+                                    if was_paused {
+                                        new_sink.pause();
+                                    }
+                                    let old_sink = sink.take();
+                                    sink = Some(new_sink);
+                                    if let Some(s) = old_sink {
+                                        s.stop();
+                                    }
+                                    let mut st = state_thread.lock().unwrap();
+                                    st.is_playing = !was_paused;
+                                    st.is_paused = was_paused;
+                                    st.play_started_at = if was_paused { None } else { Some(start) };
+                                    st.elapsed_before_pause = current_pos;
+                                }
+                                Err(e) => {
+                                    eprintln!("[audio] SetEqualizer rebuild failed: {e}");
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -305,6 +379,10 @@ impl AudioPlayer {
 
     pub fn set_volume(&self, volume: f32) {
         let _ = self.tx.send(Cmd::SetVolume(volume));
+    }
+
+    pub fn set_equalizer(&self, eq: EqualizerSettings) {
+        let _ = self.tx.send(Cmd::SetEqualizer(eq));
     }
 
     pub fn is_finished(&self) -> bool {

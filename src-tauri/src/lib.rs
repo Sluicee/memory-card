@@ -4,7 +4,7 @@ mod media_controls;
 mod discord_rpc;
 mod ffmpeg_source;
 
-use audio::{create_player, PlaybackState, SharedPlayer};
+use audio::{create_player, EqualizerSettings, PlaybackState, SharedPlayer};
 use media_controls::MediaControlsManager;
 use scanner::{calculate_library_size, scan_folder, Album, cover_filename};
 use tauri_plugin_dialog::DialogExt;
@@ -285,6 +285,11 @@ fn audio_set_volume(volume: f32, player: tauri::State<SharedPlayer>) {
 }
 
 #[tauri::command]
+fn audio_set_equalizer(settings: EqualizerSettings, player: tauri::State<SharedPlayer>) {
+    player.set_equalizer(settings);
+}
+
+#[tauri::command]
 fn audio_get_state(player: tauri::State<SharedPlayer>) -> PlaybackState {
     player.get_state()
 }
@@ -415,6 +420,7 @@ pub fn run() {
             audio_stop,
             audio_seek,
             audio_set_volume,
+            audio_set_equalizer,
             audio_get_state,
             audio_is_finished,
             audio_get_position,

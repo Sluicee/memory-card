@@ -125,9 +125,12 @@
     $updateInfo ? { label: $t('getUpdate', $updateInfo.version), action: getUpdate } : null
   );
 
+  import { isEqualizerOpen } from '$lib/stores/equalizer';
+
   const leftItems = $derived([
     { label: $t('addFolder'),     action: addFolder  },
     { label: $t('refreshLibrary'), action: refresh   },
+    { label: $t('equalizer'),      action: () => { playUiSfx('open'); isEqualizerOpen.set(true); handleClose(false); } },
     { label: $t('statistics'),    action: openStats  },
     { label: $t('clearLibrary'),  action: clear      },
   ]);

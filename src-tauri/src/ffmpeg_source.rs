@@ -6,6 +6,8 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 
+use crate::audio::EqualizerSettings;
+
 pub struct FFmpegSource {
     _child: Child, // Keep it to kill on drop
     consumer: Consumer<f32>,
@@ -17,8 +19,25 @@ pub struct FFmpegSource {
     silence_count: u32,
 }
 
+pub fn build_af_filter_string(eq: &EqualizerSettings) -> String {
+    let preamp_factor = 0.90 * 10.0f32.powf(eq.preamp.clamp(-12.0, 12.0) / 20.0);
+    let mut af_parts = vec![format!("volume={:.4}", preamp_factor)];
+
+    let freqs = [31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+    for (i, &f) in freqs.iter().enumerate() {
+        let gain = eq.gains.get(i).copied().unwrap_or(0.0).clamp(-12.0, 12.0);
+        if gain.abs() > 0.01 {
+            af_parts.push(format!("equalizer=f={:.2}:width_type=q:width=1.41:g={:.2}", f, gain));
+        }
+    }
+
+    // Auto-gain limiter to prevent digital clipping
+    af_parts.push("alimiter=limit=0.95".to_string());
+    af_parts.join(",")
+}
+
 impl FFmpegSource {
-    pub fn new(app: &AppHandle, path: &str, seek_secs: f64) -> Result<Self, String> {
+    pub fn new(app: &AppHandle, path: &str, seek_secs: f64, eq: &EqualizerSettings) -> Result<Self, String> {
         if path != "prewarm" {
             let p = std::path::Path::new(path);
             if !p.exists() {
@@ -30,6 +49,7 @@ impl FFmpegSource {
         }
 
         let seek_str = format!("{:.3}", seek_secs);
+        let af_string = build_af_filter_string(eq);
 
         // Configure arguments
         let sidecar_args = vec![
@@ -40,7 +60,7 @@ impl FFmpegSource {
             "-ar",
             "44100",
             "-af",
-            "volume=0.90,alimiter=limit=0.95",
+            &af_string,
             "-vn",
             "-sn",
             "-map_metadata",
@@ -217,5 +237,32 @@ impl Source for FFmpegSource {
 impl Drop for FFmpegSource {
     fn drop(&mut self) {
         let _ = self._child.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_equalizer_flat_filter_string() {
+        let eq = EqualizerSettings::default();
+        let af = build_af_filter_string(&eq);
+        assert_eq!(af, "volume=0.9000,alimiter=limit=0.95");
+    }
+
+    #[test]
+    fn test_equalizer_custom_gains_filter_string() {
+        let eq = EqualizerSettings {
+            enabled: true,
+            preamp: 3.0,
+            gains: vec![6.0, 0.0, -3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0],
+        };
+        let af = build_af_filter_string(&eq);
+        assert!(af.contains("volume=1.2713"));
+        assert!(af.contains("equalizer=f=31.25:width_type=q:width=1.41:g=6.00"));
+        assert!(af.contains("equalizer=f=125.00:width_type=q:width=1.41:g=-3.00"));
+        assert!(af.contains("equalizer=f=16000.00:width_type=q:width=1.41:g=5.00"));
+        assert!(af.contains("alimiter=limit=0.95"));
     }
 }

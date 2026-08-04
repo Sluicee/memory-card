@@ -34,6 +34,12 @@ type Dict = typeof en;
 type DictKey = keyof Dict;
 
 const en = {
+  equalizer: 'Equalizer',
+  eqEnabled: (on: boolean) => `EQ: ${on ? 'ON' : 'OFF'}`,
+  preamp: 'Preamp',
+  preset: 'Preset',
+  resetEq: 'Reset',
+  savePreset: 'Save Preset',
   // Header
   memoryCard: 'Memory Card',
   scanning: 'Scanning…',
@@ -123,6 +129,12 @@ const en = {
 };
 
 const ru: Dict = {
+  equalizer: 'Equalizer',
+  eqEnabled: (on: boolean) => `EQ: ${on ? 'ON' : 'OFF'}`,
+  preamp: 'Preamp',
+  preset: 'Preset',
+  resetEq: 'Reset',
+  savePreset: 'Save Preset',
   // Header
   memoryCard: 'Memory Card',
   scanning: 'Сканирование…',
@@ -217,6 +229,12 @@ const ru: Dict = {
 };
 
 const ja: Dict = {
+  equalizer: 'Equalizer',
+  eqEnabled: (on: boolean) => `EQ: ${on ? 'ON' : 'OFF'}`,
+  preamp: 'Preamp',
+  preset: 'Preset',
+  resetEq: 'Reset',
+  savePreset: 'Save Preset',
   // Header
   memoryCard: 'Memory Card',
   scanning: 'スキャン中…',
