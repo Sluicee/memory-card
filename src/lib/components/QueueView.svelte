@@ -16,6 +16,8 @@
     playFromUserQueue,
     jumpToInSourceQueue,
     jumpToInAlbum,
+    removeFromSourceQueue,
+    clearSourceQueue,
   } from '../stores/player';
   import { playUiSfx } from '$lib/ui-sfx';
   import { t } from '$lib/stores/i18n';
@@ -112,6 +114,16 @@
   function handleClear() {
     playUiSfx('back');
     clearQueue();
+  }
+
+  function handleSourceRemove(relIdx: number) {
+    playUiSfx('back');
+    removeFromSourceQueue(relIdx);
+  }
+
+  function handleSourceClear() {
+    playUiSfx('back');
+    clearSourceQueue();
   }
 
   async function handleSourcePlay(relIdx: number) {
@@ -231,10 +243,13 @@
   <!-- SOURCE (album / shuffle / playlist) -->
   {#if sourceItems.length > 0}
     <div class="section-hd section-hd--source">
-      <span class="section-label">{sourceLabel}</span>
-      {#if sourceAlbum && !$isShuffled && !$currentPlaylistId}
-        <span class="source-name">{sourceAlbum.title}</span>
-      {/if}
+      <div class="section-hd-left">
+        <span class="section-label">{sourceLabel}</span>
+        {#if sourceAlbum && !$isShuffled && !$currentPlaylistId}
+          <span class="source-name">{sourceAlbum.title}</span>
+        {/if}
+      </div>
+      <button class="clear-btn" onclick={handleSourceClear}>{$t('clearQueue')}</button>
     </div>
 
     <ul class="queue-list source-list">
@@ -246,6 +261,12 @@
             <span class="q-artist">{item.track.artist}</span>
           </button>
           <span class="q-dur">{fmt(item.track.duration)}</span>
+          <button class="q-remove" onclick={() => handleSourceRemove(i)} title="Remove">
+            <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" width="8" height="8">
+              <line x1="1" y1="1" x2="7" y2="7"/><line x1="7" y1="1" x2="1" y2="7"/>
+            </svg>
+          </button>
         </li>
       {/each}
     </ul>

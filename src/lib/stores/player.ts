@@ -768,3 +768,50 @@ export async function jumpToInSourceQueue(absIdx: number) {
 export async function jumpToInAlbum(track: Track, album: Album) {
   await playTrack(track, album, false);
 }
+
+/** Remove a track from the upcoming source queue by relative index (0 = next track). */
+export function removeFromSourceQueue(relIdx: number) {
+  if (relIdx < 0) return;
+
+  if (_queue.length > 0) {
+    const absIdx = _qIdx + 1 + relIdx;
+    if (absIdx >= 0 && absIdx < _queue.length) {
+      _queue.splice(absIdx, 1);
+      syncSourceQueue();
+      preloadNext();
+    }
+  } else {
+    // Album sequential mode: materialize remaining album tracks into _queue, then remove
+    const album = _sourceReturnAlbum ?? get(currentAlbum);
+    const trackId = _sourceReturnTrackId ?? get(currentTrack)?.id;
+    if (album && trackId) {
+      const curIdx = album.tracks.findIndex((t) => t.id === trackId);
+      if (curIdx !== -1) {
+        _queue = album.tracks.map((t) => ({ track: t, album }));
+        _qIdx = curIdx;
+        const absIdx = _qIdx + 1 + relIdx;
+        if (absIdx < _queue.length) {
+          _queue.splice(absIdx, 1);
+        }
+        isShuffled.set(false);
+        currentPlaylistId.set(null);
+        syncSourceQueue();
+        preloadNext();
+      }
+    }
+  }
+}
+
+/** Clear the upcoming source queue (shuffle / playlist / album sequence). */
+export function clearSourceQueue() {
+  _queue = [];
+  _qIdx = -1;
+  _sourceReturnAlbum = null;
+  _sourceReturnTrackId = null;
+  isShuffled.set(false);
+  currentPlaylistId.set(null);
+  syncSourceReturn();
+  syncSourceQueue();
+  preloadNext();
+}
+
