@@ -16,3 +16,7 @@ CLAUDE.md
 
 # IDE
 .vscode/
+
+# Manual tests
+docs/manual_tests/
+
