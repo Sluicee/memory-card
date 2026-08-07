@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from "$lib/stores/i18n";
   import { isScanning, librarySize, scanStatus } from "$lib/stores/library";
-  import type { Album, Artist } from "$lib/types";
+  import type { Album, Artist, Clip } from "$lib/types";
   import type { Playlist } from "$lib/stores/playlists";
 
   let {
@@ -11,16 +11,18 @@
     hoveredAlbum = null,
     hoveredArtist = null,
     hoveredPlaylist = null,
+    hoveredClip = null,
     selectedArtistFilter = $bindable(null),
     onSearchKey,
     onClearArtistFilter,
   }: {
-    activeTab: "library" | "artists" | "playlists" | "queue";
+    activeTab: "library" | "artists" | "playlists" | "queue" | "clips";
     searchOpen?: boolean;
     searchQuery?: string;
     hoveredAlbum?: Album | null;
     hoveredArtist?: Artist | null;
     hoveredPlaylist?: Playlist | null;
+    hoveredClip?: Clip | null;
     selectedArtistFilter?: string | null;
     onSearchKey?: (e: KeyboardEvent) => void;
     onClearArtistFilter?: () => void;
@@ -99,6 +101,8 @@
       <span class="hovered-title">{hoveredArtist.name}</span>
     {:else if activeTab === "playlists" && hoveredPlaylist}
       <span class="hovered-title">{hoveredPlaylist.name}</span>
+    {:else if activeTab === "clips" && hoveredClip}
+      <span class="hovered-title">{hoveredClip.title}</span>
     {/if}
   </div>
 </header>

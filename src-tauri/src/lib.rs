@@ -3,8 +3,17 @@ mod scanner;
 mod media_controls;
 mod discord_rpc;
 mod ffmpeg_source;
+mod ffmpeg_util;
+mod clip_video;
+mod clip_scanner;
+mod clip_commands;
 
 use audio::{create_player, EqualizerSettings, PlaybackState, SharedPlayer};
+use clip_commands::{
+    clip_video_start, clip_video_seek, clip_video_pause, clip_video_resume, clip_video_resync, clip_video_stop,
+    scan_clip_folder, save_clip_cache, load_clip_cache, clear_clip_thumbs,
+};
+use clip_video::create_clip_video_player;
 use media_controls::MediaControlsManager;
 use scanner::{calculate_library_size, scan_folder, Album, cover_filename};
 use tauri_plugin_dialog::DialogExt;
@@ -403,6 +412,9 @@ pub fn run() {
 
             let manager = MediaControlsManager::new(app.handle());
             app.manage(manager);
+
+            let clip_video = create_clip_video_player(app.handle().clone());
+            app.manage(clip_video);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -426,6 +438,16 @@ pub fn run() {
             audio_get_position,
             save_library_cache,
             load_library_cache,
+            scan_clip_folder,
+            save_clip_cache,
+            load_clip_cache,
+            clear_clip_thumbs,
+            clip_video_start,
+            clip_video_seek,
+            clip_video_pause,
+            clip_video_resume,
+            clip_video_resync,
+            clip_video_stop,
             update_media_metadata,
             update_media_playback_state,
             set_discord_rpc_enabled,

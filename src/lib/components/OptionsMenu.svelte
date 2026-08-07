@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { scanFolder, refreshLibrary, clearLibrary } from '../stores/library';
+  import { scanClipFolder, refreshClipLibrary, clearClipLibrary } from '../stores/clips';
   import { updateInfo } from '../stores/updates';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
@@ -20,7 +21,15 @@
     return true;
   }
 
-  let { onclose, onStats }: { onclose: () => void; onStats: () => void } = $props();
+  let {
+    onclose,
+    onStats,
+    activeTab,
+  }: {
+    onclose: () => void;
+    onStats: () => void;
+    activeTab: "library" | "artists" | "playlists" | "queue" | "clips";
+  } = $props();
   let autostartEnabled = $state(false);
   let discordRpcEnabled = $state(loadDiscordRpcEnabled());
   let appVersion = $state('');
@@ -97,6 +106,27 @@
     handleClose(false);
   }
 
+  async function addClipFolder() {
+    const path = await invoke<string | null>('pick_folder');
+    if (path) {
+      playUiSfx('scan');
+      await scanClipFolder(path);
+    }
+    handleClose(false);
+  }
+
+  async function refreshClips() {
+    playUiSfx('scan');
+    handleClose(false);
+    await refreshClipLibrary();
+  }
+
+  function clearClips() {
+    playUiSfx('confirm');
+    clearClipLibrary();
+    handleClose(false);
+  }
+
   function openStats() {
     playUiSfx('open');
     onclose();
@@ -127,13 +157,21 @@
 
   import { isEqualizerOpen } from '$lib/stores/equalizer';
 
-  const leftItems = $derived([
-    { label: $t('addFolder'),     action: addFolder  },
-    { label: $t('refreshLibrary'), action: refresh   },
-    { label: $t('equalizer'),      action: () => { playUiSfx('open'); isEqualizerOpen.set(true); handleClose(false); } },
-    { label: $t('statistics'),    action: openStats  },
-    { label: $t('clearLibrary'),  action: clear      },
-  ]);
+  const leftItems = $derived(
+    activeTab === 'clips'
+      ? [
+          { label: $t('addClipFolder'), action: addClipFolder },
+          { label: $t('refreshClips'),  action: refreshClips  },
+          { label: $t('clearClips'),    action: clearClips    },
+        ]
+      : [
+          { label: $t('addFolder'),     action: addFolder  },
+          { label: $t('refreshLibrary'), action: refresh   },
+          { label: $t('equalizer'),      action: () => { playUiSfx('open'); isEqualizerOpen.set(true); handleClose(false); } },
+          { label: $t('statistics'),    action: openStats  },
+          { label: $t('clearLibrary'),  action: clear      },
+        ],
+  );
 
   import { sortMode, cycleSortMode } from '$lib/stores/sortMode';
 
@@ -161,7 +199,7 @@
   // Gamepad cursor: -1 = none, 0 = updateItem, 1..L = left col, L+1..L+R = right col
   let gpIdx = $state(-1);
 
-  const LEFT_COUNT = 4;
+  const LEFT_COUNT = $derived(leftItems.length);
 
   function getUpdateOffset() { return updateItem ? 1 : 0; }
 

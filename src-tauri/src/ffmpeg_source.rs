@@ -1,12 +1,12 @@
 use rodio::Source;
 use rtrb::{Consumer, RingBuffer};
 use std::io::{BufReader, Read};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 use tauri::AppHandle;
-use tauri_plugin_shell::ShellExt;
 
 use crate::audio::EqualizerSettings;
+use crate::ffmpeg_util::build_ffmpeg_command;
 
 pub struct FFmpegSource {
     _child: Child, // Keep it to kill on drop
@@ -67,40 +67,16 @@ impl FFmpegSource {
             "-1",
         ];
 
-        // 1. Try to find the organized production binary in bin/ffmpeg[.exe]
-        // 2. Fallback to standard sidecar (for Dev mode or standard installs)
-        use tauri::Manager;
-        let exe_dir = app.path().executable_dir().ok();
-        let bin_ffmpeg = exe_dir.as_ref().map(|d| d.join("bin").join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)));
-
-        let mut std_command: Command = if bin_ffmpeg.as_ref().map(|p| p.exists()).unwrap_or(false) {
-            let mut cmd = Command::new(bin_ffmpeg.unwrap());
-            if path == "prewarm" {
-                cmd.arg("-version");
-            } else {
-                cmd.args(["-ss", &seek_str])
-                    .args(["-i", path])
-                    .args(sidecar_args)
-                    .arg("pipe:1");
-            }
-            cmd
+        let mut std_command = build_ffmpeg_command(app)?;
+        if path == "prewarm" {
+            std_command.arg("-version");
         } else {
-            let sidecar_command = app
-                .shell()
-                .sidecar("ffmpeg")
-                .map_err(|e| format!("Failed to create sidecar command: {}", e))?;
-
-            let command = if path == "prewarm" {
-                sidecar_command.arg("-version")
-            } else {
-                sidecar_command
-                    .args(["-ss", &seek_str])
-                    .args(["-i", path])
-                    .args(sidecar_args)
-                    .arg("pipe:1")
-            };
-            command.into()
-        };
+            std_command
+                .args(["-ss", &seek_str])
+                .args(["-i", path])
+                .args(sidecar_args)
+                .arg("pipe:1");
+        }
 
         let mut child = std_command
             .stdout(Stdio::piped())
@@ -237,6 +213,8 @@ impl Source for FFmpegSource {
 impl Drop for FFmpegSource {
     fn drop(&mut self) {
         let _ = self._child.kill();
+        // See ChildGuard::drop in clip_video.rs — kill() alone leaves a zombie.
+        let _ = self._child.wait();
     }
 }
 

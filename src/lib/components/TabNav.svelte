@@ -6,8 +6,8 @@
     activeTab = $bindable("library"),
     onSelectTab,
   }: {
-    activeTab?: "library" | "artists" | "playlists" | "queue";
-    onSelectTab: (tab: "library" | "artists" | "playlists" | "queue") => void;
+    activeTab?: "library" | "artists" | "playlists" | "queue" | "clips";
+    onSelectTab: (tab: "library" | "artists" | "playlists" | "queue" | "clips") => void;
   } = $props();
 </script>
 
@@ -17,6 +17,7 @@
     class:tab-thumb--artists={activeTab === "artists"}
     class:tab-thumb--playlists={activeTab === "playlists"}
     class:tab-thumb--queue={activeTab === "queue"}
+    class:tab-thumb--clips={activeTab === "clips"}
   ></div>
   <button
     class="tab-opt"
@@ -35,6 +36,12 @@
     class:tab-opt--active={activeTab === "playlists"}
     onclick={() => onSelectTab("playlists")}
     >{$t("playlists")}</button
+  >
+  <button
+    class="tab-opt tab-opt--clips"
+    class:tab-opt--active={activeTab === "clips"}
+    onclick={() => onSelectTab("clips")}
+    >{$t("clipsTab")}</button
   >
   <button
     class="tab-opt tab-opt--queue"

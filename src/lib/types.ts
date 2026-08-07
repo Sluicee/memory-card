@@ -28,6 +28,17 @@ export interface Artist {
   albums: Album[];
 }
 
+export interface Clip {
+  id: string;
+  path: string;
+  title: string;
+  thumbnail: string | null;
+  duration: number;
+  width: number;
+  height: number;
+  search_index: string;
+}
+
 export interface EqualizerSettings {
   enabled: boolean;
   preamp: number;

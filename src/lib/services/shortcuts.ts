@@ -1,6 +1,7 @@
 import { playUiSfx } from "$lib/ui-sfx";
 import { viewMode } from "$lib/stores/viewMode";
 import { selectedAlbum } from "$lib/stores/library";
+import { selectedClip } from "$lib/stores/clips";
 import {
   currentTrack,
   currentAlbum,
@@ -26,8 +27,8 @@ export interface ShortcutCallbacks {
   setSearchQuery: (v: string) => void;
   selectedArtistFilter: string | null;
   setSelectedArtistFilter: (v: string | null) => void;
-  activeTab: "library" | "artists" | "playlists" | "queue";
-  setActiveTab: (tab: "library" | "artists" | "playlists" | "queue") => void;
+  activeTab: "library" | "artists" | "playlists" | "queue" | "clips";
+  setActiveTab: (tab: "library" | "artists" | "playlists" | "queue" | "clips") => void;
   setFollowPlayback: (v: boolean) => void;
   handleTransportPlayPause: () => void;
   handlePrev: () => void;
@@ -46,6 +47,8 @@ export function handleGlobalKeydown(
 
   let getSelectedAlbum: any;
   selectedAlbum.subscribe((val) => (getSelectedAlbum = val))();
+  let getSelectedClip: any;
+  selectedClip.subscribe((val) => (getSelectedClip = val))();
 
   switch (e.code) {
     case "Space":
@@ -101,7 +104,15 @@ export function handleGlobalKeydown(
     case "Escape":
       let curViewMode = "normal";
       viewMode.subscribe((v) => (curViewMode = v))();
-      if (curViewMode !== "normal") {
+      if (getSelectedClip) {
+        // ClipPlayerView sits above everything else (z-index 250) — closing
+        // it takes priority over whatever else might technically be "open"
+        // underneath. One step: exits fullscreen/focus (if active) and
+        // closes the clip together.
+        playUiSfx("back");
+        if (curViewMode !== "normal") viewMode.set("normal");
+        selectedClip.set(null);
+      } else if (curViewMode !== "normal") {
         playUiSfx("back");
         viewMode.set("normal");
       } else if (callbacks.optionsOpen) {
@@ -139,6 +150,10 @@ export function handleGlobalKeydown(
       break;
     case "Digit4":
       callbacks.setActiveTab("queue");
+      playUiSfx("confirm");
+      break;
+    case "Digit5":
+      callbacks.setActiveTab("clips");
       playUiSfx("confirm");
       break;
   }

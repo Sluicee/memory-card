@@ -8,6 +8,10 @@
   import PlaylistGrid from "$lib/components/PlaylistGrid.svelte";
   import PlaylistView from "$lib/components/PlaylistView.svelte";
   import ArtistGrid from "$lib/components/ArtistGrid.svelte";
+  import ClipGrid from "$lib/components/ClipGrid.svelte";
+  import type ClipGridType from "$lib/components/ClipGrid.svelte";
+  import ClipPlayerView from "$lib/components/ClipPlayerView.svelte";
+  import type ClipPlayerViewType from "$lib/components/ClipPlayerView.svelte";
   import OptionsMenu from "$lib/components/OptionsMenu.svelte";
   import type OptionsMenuType from "$lib/components/OptionsMenu.svelte";
   import StatsView from "$lib/components/StatsView.svelte";
@@ -33,6 +37,14 @@
     scanStatus,
     loadCache,
   } from "$lib/stores/library";
+  import {
+    clips,
+    selectedClip,
+    loadClipCache,
+    isClipScanning,
+    clipScanStatus,
+  } from "$lib/stores/clips";
+  import type { Clip } from "$lib/types";
   import {
     currentTrack,
     currentAlbum,
@@ -73,13 +85,15 @@
 
   import "./page-shell.css";
 
-  let activeTab = $state<"library" | "artists" | "playlists" | "queue">(
+  let activeTab = $state<"library" | "artists" | "playlists" | "queue" | "clips">(
     "library",
   );
   let initialAlbumPage = $state(0);
+  let initialClipPage = $state(0);
   let hoveredAlbum = $state<Album | null>(null);
   let hoveredArtist = $state<Artist | null>(null);
   let hoveredPlaylist = $state<Playlist | null>(null);
+  let hoveredClip = $state<Clip | null>(null);
   let selectedPlaylist = $state<Playlist | null>(null);
   let selectedArtistFilter = $state<string | null>(null);
   let optionsOpen = $state(false);
@@ -98,6 +112,8 @@
 
   // Component refs for gamepad cursor control
   let albumGrid = $state<AlbumGridType | null>(null);
+  let clipGrid = $state<ClipGridType | null>(null);
+  let clipPlayerView = $state<ClipPlayerViewType | null>(null);
   let albumView = $state<AlbumViewType | null>(null);
   let optionsMenu = $state<OptionsMenuType | null>(null);
   let gpNowPlayingFocused = $state(false);
@@ -161,6 +177,19 @@
         return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
       });
     })(),
+  );
+
+  const filteredClips = $derived(
+    searchOpen && searchQuery.trim()
+      ? (() => {
+          const q = searchQuery.trim().toLowerCase();
+          return $clips.filter(
+            (c) =>
+              c.title.toLowerCase().includes(q) ||
+              c.search_index?.toLowerCase().includes(q),
+          );
+        })()
+      : $clips,
   );
 
   const filteredPlaylists = $derived(
@@ -238,6 +267,7 @@
     }
 
     await loadCache();
+    await loadClipCache();
 
     initialAlbumPage = 0;
 
@@ -271,12 +301,42 @@
     }
     if (statsOpen || npPickerOpen) return;
 
-    if ($selectedAlbum) {
+    if ($selectedClip) {
+      handleGamepadClipPlayer(action);
+    } else if ($selectedAlbum) {
       handleGamepadAlbumView(action);
     } else if (selectedPlaylist) {
       handleGamepadPlaylistView(action);
     } else {
       handleGamepadGrid(action);
+    }
+  }
+
+  function handleGamepadClipPlayer(action: GamepadAction) {
+    switch (action) {
+      case "circle":
+        playUiSfx("back");
+        if ($viewMode !== "normal") viewMode.set("normal");
+        selectedClip.set(null);
+        break;
+      case "cross":
+      case "start":
+        clipPlayerView?.gamepadTogglePlayPause();
+        break;
+      case "l1":
+        clipPlayerView?.gamepadSeekBy(-5);
+        break;
+      case "r1":
+        clipPlayerView?.gamepadSeekBy(5);
+        break;
+      case "l2":
+        playUiSfx("steps");
+        stepVolume(-1);
+        break;
+      case "r2":
+        playUiSfx("steps");
+        stepVolume(1);
+        break;
     }
   }
 
@@ -334,7 +394,8 @@
 
     switch (action) {
       case "cross":
-        albumGrid?.gamepadConfirm();
+        if (activeTab === "clips") clipGrid?.gamepadConfirm();
+        else albumGrid?.gamepadConfirm();
         break;
       case "circle":
         toggleSearch();
@@ -369,9 +430,12 @@
             ? "artists"
             : activeTab === "artists"
               ? "playlists"
-              : "library";
+              : activeTab === "playlists"
+                ? "clips"
+                : "library";
         playUiSfx("confirm");
         albumGrid?.gamepadClearCursor();
+        clipGrid?.gamepadClearCursor();
         gpNowPlayingFocused = false;
         break;
       case "l3":
@@ -379,6 +443,7 @@
         break;
       case "up":
         if (activeTab === "library") albumGrid?.gamepadNavigate("up");
+        else if (activeTab === "clips") clipGrid?.gamepadNavigate("up");
         break;
       case "down":
         if (activeTab === "library") {
@@ -387,13 +452,17 @@
             albumGrid?.gamepadClearCursor();
             gpNowPlayingFocused = true;
           }
+        } else if (activeTab === "clips") {
+          clipGrid?.gamepadNavigate("down");
         }
         break;
       case "left":
         if (activeTab === "library") albumGrid?.gamepadNavigate("left");
+        else if (activeTab === "clips") clipGrid?.gamepadNavigate("left");
         break;
       case "right":
         if (activeTab === "library") albumGrid?.gamepadNavigate("right");
+        else if (activeTab === "clips") clipGrid?.gamepadNavigate("right");
         break;
     }
   }
@@ -484,6 +553,11 @@
     selectedAlbum.set(album);
   }
 
+  function selectClip(clip: Clip) {
+    playUiSfx("confirm");
+    selectedClip.set(clip);
+  }
+
   async function handleTransportPlayPause() {
     if ($isPlaying) await pause();
     else await resume();
@@ -570,6 +644,7 @@
         {hoveredAlbum}
         {hoveredArtist}
         {hoveredPlaylist}
+        {hoveredClip}
         bind:selectedArtistFilter
         {onSearchKey}
         onClearArtistFilter={() => {
@@ -692,6 +767,61 @@
               onhover={(pl) => (hoveredPlaylist = pl)}
             />
           {/if}
+        {:else if activeTab === "clips"}
+          {#if $isClipScanning && $clips.length === 0}
+            <div class="state-msg">
+              <div class="spinner"></div>
+              <p class="scan-info">
+                {#if $clipScanStatus.filesScanned > 0}
+                  {$t(
+                    "scanClipFiles",
+                    $clipScanStatus.filesScanned,
+                    $clipScanStatus.clipsFound,
+                  )}
+                {:else}
+                  {$t("startingScan")}
+                {/if}
+              </p>
+            </div>
+          {:else if $clips.length === 0}
+            <div class="state-msg">
+              <p class="hint">{$t("noClipsYet")}</p>
+            </div>
+          {:else if searchOpen && searchQuery && filteredClips.length === 0}
+            <div class="state-msg">
+              <p class="hint">
+                {$t("noResultsFor")} <strong>{searchQuery}</strong>
+              </p>
+            </div>
+          {:else}
+            {#if $isClipScanning}
+              <div class="scan-bar">
+                {#if $clipScanStatus.totalFiles > 0}
+                  {@const pct = Math.round(
+                    ($clipScanStatus.filesScanned / $clipScanStatus.totalFiles) * 100,
+                  )}
+                  <div class="scan-bar-track">
+                    <div class="scan-bar-fill" style="width: {pct}%"></div>
+                  </div>
+                  <span class="scan-bar-label"
+                    >{pct}% · {$clipScanStatus.clipsFound}
+                    {$t("clipsFoundLabel")}</span
+                  >
+                {:else}
+                  <div class="spinner-sm"></div>
+                  <span>{$t("startingScan")}</span>
+                {/if}
+              </div>
+            {/if}
+            <ClipGrid
+              bind:this={clipGrid}
+              clips={filteredClips}
+              onselect={selectClip}
+              onhover={(c) => (hoveredClip = c)}
+              initialPage={initialClipPage}
+              onPageChange={(p) => (initialClipPage = p)}
+            />
+          {/if}
         {:else}
           <QueueView />
         {/if}
@@ -739,6 +869,14 @@
       />
     {/if}
 
+    {#if $selectedClip}
+      <ClipPlayerView
+        bind:this={clipPlayerView}
+        clip={$selectedClip}
+        onclose={() => selectedClip.set(null)}
+      />
+    {/if}
+
     {#if npPickerOpen && $currentTrack}
       <PlaylistPicker
         track={$currentTrack}
@@ -749,6 +887,7 @@
     {#if optionsOpen}
       <OptionsMenu
         bind:this={optionsMenu}
+        {activeTab}
         onclose={() => (optionsOpen = false)}
         onStats={() => (statsOpen = true)}
       />

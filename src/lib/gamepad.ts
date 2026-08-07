@@ -36,7 +36,16 @@ const listeners = new Set<Listener>();
 const _connected = writable(false);
 export const gamepadConnected: Readable<boolean> = { subscribe: _connected.subscribe };
 
-let rafId = 0;
+// setInterval-driven, NOT requestAnimationFrame — this loop runs for the
+// entire app lifetime regardless of view, and having it as a second
+// concurrent rAF consumer alongside a view's own draw loop (e.g.
+// ClipPlayerView's WebGL canvas) was found to throttle BOTH loops down to
+// ~15fps on WebKitGTK/NVIDIA (reproduced directly: two independent
+// simultaneous rAF loops on separate canvases both dropped to ~15fps,
+// while either alone ran at full ~60fps). setInterval at roughly the same
+// cadence preserves gamepad responsiveness without competing for rAF slots.
+const POLL_INTERVAL_MS = 16;
+let intervalId: ReturnType<typeof setInterval> | 0 = 0;
 let prevPressed: Record<string, boolean> = {};
 const holdStart  = new Map<GamepadAction, number>();
 const lastRepeat = new Map<GamepadAction, number>();
@@ -75,12 +84,13 @@ function processActionState(action: GamepadAction, pressed: boolean, now: DOMHig
   prevPressed[action] = pressed;
 }
 
-function pollFrame(now: DOMHighResTimeStamp) {
+function pollFrame() {
+  const now = performance.now();
+
   if (!browser || !document.hasFocus()) {
     prevPressed = {};
     holdStart.clear();
     lastRepeat.clear();
-    rafId = requestAnimationFrame(pollFrame);
     return;
   }
 
@@ -124,19 +134,17 @@ function pollFrame(now: DOMHighResTimeStamp) {
   } else {
     _connected.set(false);
   }
-
-  rafId = requestAnimationFrame(pollFrame);
 }
 
 export function startPolling() {
-  if (rafId) return;
+  if (intervalId) return;
   prevPressed = {};
-  rafId = requestAnimationFrame(pollFrame);
+  intervalId = setInterval(pollFrame, POLL_INTERVAL_MS);
 }
 
 export function stopPolling() {
-  cancelAnimationFrame(rafId);
-  rafId = 0;
+  if (intervalId) clearInterval(intervalId);
+  intervalId = 0;
   prevPressed = {};
   holdStart.clear();
   lastRepeat.clear();
