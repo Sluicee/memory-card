@@ -92,6 +92,10 @@ Produces a platform-native installer in `src-tauri/target/release/bundle/`.
 - Playback position and track-end detection use a 1-second polling loop on the frontend.
 - Settings and last-played track are stored in `localStorage`. The full library cache lives in Tauri's app data directory.
 
+## Known Issues
+
+- **Choppy fullscreen clip playback on Linux with NVIDIA's proprietary driver.** On some NVIDIA + WebKitGTK combinations, WebKitGTK decides hardware-accelerated video compositing is unavailable at process startup and silently falls back to software video rendering — capping fullscreen clip playback below the source frame rate (e.g. ~20fps instead of 30). This is a known, unresolved upstream WebKitGTK/NVIDIA driver interaction issue (see [tauri-apps/tauri#9394](https://github.com/tauri-apps/tauri/issues/9394) and similar reports across other WebKitGTK-based apps), not something this app can fix — WebKitGTK gives no supported way to override the decision after the fact. Windows (WebView2) and Mesa/open-source-driver Linux setups are not affected.
+
 ## License
 
 This project is licensed under the **GNU General Public License v3.0** (GPLv3). See the [LICENSE](LICENSE) file for details.
