@@ -1,8 +1,8 @@
-use tauri::ipc::{Channel, Response};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::clip_scanner::scan_clip_folder as run_clip_scan;
-use crate::clip_video::SharedClipVideo;
+use crate::clip_stream_server::ClipStreamServer;
 
 #[tauri::command]
 pub async fn scan_clip_folder(path: String, app: AppHandle) -> Result<(), String> {
@@ -67,40 +67,10 @@ pub async fn load_clip_cache(app: AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
+/// (port, token) for the local clip-stream HTTP server — the frontend
+/// builds the actual stream URL from these plus a path/seek/size/playable-
+/// codecs query string (see clips.ts's buildClipStreamUrl).
 #[tauri::command]
-pub fn clip_video_start(
-    path: String,
-    seek_secs: f64,
-    max_w: u32,
-    max_h: u32,
-    channel: Channel<Response>,
-    generation: u64,
-    state: State<SharedClipVideo>,
-) -> Result<(), String> {
-    state.start(path, seek_secs, max_w, max_h, channel, generation)
-}
-
-#[tauri::command]
-pub fn clip_video_seek(seek_secs: f64, generation: u64, max_w: u32, max_h: u32, state: State<SharedClipVideo>) {
-    state.seek(seek_secs, generation, max_w, max_h);
-}
-
-#[tauri::command]
-pub fn clip_video_pause(state: State<SharedClipVideo>) {
-    state.pause();
-}
-
-#[tauri::command]
-pub fn clip_video_resume(state: State<SharedClipVideo>) {
-    state.resume();
-}
-
-#[tauri::command]
-pub fn clip_video_resync(audio_pos: f64, state: State<SharedClipVideo>) {
-    state.resync(audio_pos);
-}
-
-#[tauri::command]
-pub fn clip_video_stop(state: State<SharedClipVideo>) {
-    state.stop();
+pub fn get_clip_stream_info(state: State<Arc<ClipStreamServer>>) -> (u16, String) {
+    (state.port, state.token.clone())
 }

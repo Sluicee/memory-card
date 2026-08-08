@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tauri::AppHandle;
 
 /// Resolves ffmpeg to either the bundled production binary (`<exe_dir>/bin/ffmpeg[.exe]`)
@@ -29,6 +29,22 @@ pub struct ProbeInfo {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps: Option<f64>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+}
+
+/// Runs `ffmpeg -i <path>` just to capture its header-analysis stderr, with
+/// no output file (errors out immediately after printing it) — the same
+/// zero-extra-dependency probing trick as `parse_probe_stderr`, just doing
+/// the spawn+capture itself rather than parsing stderr someone else already
+/// captured.
+pub fn probe_file(app: &AppHandle, path: &str) -> ProbeInfo {
+    let Ok(mut cmd) = build_ffmpeg_command(app) else { return ProbeInfo::default() };
+    cmd.args(["-hide_banner", "-i", path]);
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let Ok(child) = cmd.spawn() else { return ProbeInfo::default() };
+    let Ok(output) = child.wait_with_output() else { return ProbeInfo::default() };
+    parse_probe_stderr(&String::from_utf8_lossy(&output.stderr))
 }
 
 /// Parses `Duration: HH:MM:SS.ss` and the first `Video: ..., WxH, ... fps` line out of
@@ -61,10 +77,26 @@ pub fn parse_probe_stderr(stderr: &str) -> ProbeInfo {
                 info.height = Some(h);
             }
             info.fps = parse_fps(trimmed);
+            info.video_codec = parse_codec_name(trimmed, "Video: ");
+        }
+
+        if info.audio_codec.is_none() && trimmed.starts_with("Stream") && trimmed.contains("Audio:") {
+            info.audio_codec = parse_codec_name(trimmed, "Audio: ");
         }
     }
 
     info
+}
+
+/// Pulls the bare codec name (e.g. "av1", "vp9", "opus") out of a
+/// `Stream #0:0: Video: av1 (libdav1d) (Main), ...` / `Audio: opus, ...`
+/// line — the token right after the marker, up to the first space, comma,
+/// or parenthesis (profile/decoder-name annotations that follow it).
+fn parse_codec_name(line: &str, marker: &str) -> Option<String> {
+    let idx = line.find(marker)?;
+    let rest = &line[idx + marker.len()..];
+    let token = rest.split(|c: char| c == ',' || c == ' ' || c == '(').next()?.trim();
+    if token.is_empty() { None } else { Some(token.to_string()) }
 }
 
 fn parse_timestamp(ts: &str) -> Option<f64> {

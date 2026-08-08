@@ -1,20 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { Channel, convertFileSrc } from "@tauri-apps/api/core";
-  import { FrameRenderer } from "$lib/webgl/FrameRenderer";
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import {
-    playClip,
-    pauseClip,
-    resumeClip,
-    seekClip,
-    stopClip,
-    clipPosition,
-    clipDuration,
-    clipFinished,
+    buildClipStreamUrl,
+    prepareClipPlayback,
     computePlaybackBox,
     PLAYBACK_BOUND_MIN,
     PLAYBACK_BOUND_MAX,
   } from "$lib/stores/clips";
+  import { volume } from "$lib/stores/player";
   import { viewMode } from "$lib/stores/viewMode";
   import VolumeControl from "./VolumeControl.svelte";
   import PS2Btn from "./PS2Btn.svelte";
@@ -24,55 +18,117 @@
 
   let { clip, onclose }: { clip: Clip; onclose: () => void } = $props();
 
+  // svelte-ignore state_referenced_locally -- `clip` is stable for this
+  // component's whole lifetime (remounted fresh per clip, see below); a
+  // plain const is intentional here, not a missed-reactivity bug.
+  const clipDurationVal = clip.duration || 0;
+
   // Each ClipPlayerView instance is remounted fresh per clip (see
   // +page.svelte's {#if $selectedClip}), so `clip` never changes within a
-  // single instance's lifetime. `box` DOES change within a lifetime though
-  // — the decode target tracks the *actual* measured size of .stage (see
-  // measureTargetLongSide/handleStageResize below), not a per-view-mode
-  // guess, so it naturally covers windowed, fullscreen, and mini modes the
-  // same way. The fullscreen toggle button right in this component (see
-  // toggleFullscreen below) makes switching mode — and so resizing .stage
-  // — mid-clip a normal thing to do, not an edge case.
+  // single instance's lifetime. `box` only matters for the *transcode*
+  // fallback path (clip_stream_server.rs ignores it for a remux, which
+  // always sends the source's own resolution) — it tracks .stage's actual
+  // measured size (see measureTargetLongSide/handleStageResize below) so a
+  // transcode targets exactly what's going to be displayed, whatever the
+  // window size, fullscreen or not.
   //
-  // Real measurement only happens once .stage exists (onMount) — this
-  // initial value is just a placeholder until then.
-  //
-  // svelte-ignore state_referenced_locally -- `clip` is a $props() value,
-  // stable for this component's whole lifetime (see above); only `box`
-  // itself needs to be reactive here, which it is ($state, reassigned by
+  // svelte-ignore state_referenced_locally -- see above; only `box` itself
+  // needs to be reactive here, which it is ($state, reassigned by
   // handleStageResize).
   let box = $state(computePlaybackBox(clip, PLAYBACK_BOUND_MIN));
 
-  let canvas: HTMLCanvasElement;
-  let renderer: FrameRenderer | null = null;
-  let isPlaying = $state(true);
-  let rafId = 0;
+  let videoEl: HTMLVideoElement;
 
-  // canvasScale only ever shrinks the canvas to fit .stage, never grows it
-  // past 1 — the canvas is already decoded at up to `box`'s target (see
-  // clips.ts), so stretching it further via CSS would just upscale and
-  // blur/block it for no benefit (ffmpeg's own scale= filter is what's
-  // responsible for filling the target box, per clip, up to that bound).
+  // Absolute position = seekBaseSecs (where the current stream request
+  // started) + playedSecs (how far the <video> element has played since,
+  // mirrored from its own currentTime via the timeupdate event — every
+  // seek/resolution-switch is a *fresh* HTTP request starting its own
+  // stream at t=0, so the element's own currentTime alone isn't the real
+  // position).
+  let seekBaseSecs = $state(0);
+  let playedSecs = $state(0);
+  let absolutePosition = $derived(seekBaseSecs + playedSecs);
+
+  let isPlaying = $state(true);
+  // `started`: true once the video has ever actually started playing
+  // (never reset back to false — a later mid-playback stall uses
+  // `buffering` instead, not this). `buffering`: true whenever the
+  // browser is waiting for more data, whether that's the initial load, a
+  // seek, or a real network stall — native <video> `waiting`/`playing`
+  // events already carry exactly this distinction. Reassigning `src`
+  // (every seek, every resolution switch) cleanly discards whatever was
+  // loading before, so — unlike the old raw-frame-over-IPC pipeline —
+  // there's no stale-frame race to guard against here at all.
+  //
+  // Both gate the SAME opaque placeholder in the template, not two
+  // different ones — `videoEl.load()` (called on every seek/resolution
+  // switch) immediately blanks whatever the element was showing, it
+  // doesn't hold the last frame the way the old WebGL canvas pipeline
+  // did. A translucent "still buffering" overlay over a video that's
+  // just gone black reads as a flash to black, not a light dim — so
+  // there's no lighter state to have here, only "showing real video" vs
+  // "not," covered by the placeholder either way.
+  let started = $state(false);
+  let buffering = $state(false);
+
+  async function doSeek(secs: number, targetBox: { w: number; h: number } = box) {
+    // Set *before* load(), not left to the native `waiting` event — that
+    // event is for stalling mid-playback when data runs out, not
+    // reliably fired for the moment load() itself blanks the element.
+    // Without this, the placeholder wouldn't show at all for however
+    // long it took `waiting` (if ever) to fire, leaving a plain black
+    // rectangle where the video used to be — a real bug, not just a
+    // cosmetic gap.
+    buffering = true;
+    seekBaseSecs = secs;
+    playedSecs = 0;
+    const wasPlaying = !videoEl.paused;
+    videoEl.src = await buildClipStreamUrl(clip.path, secs, targetBox);
+    videoEl.load();
+    if (wasPlaying) {
+      try {
+        await videoEl.play();
+      } catch {
+        /* autoplay/interrupted-play rejection — harmless, user can hit play */
+      }
+    }
+  }
+
   let stageEl = $state<HTMLDivElement | null>(null);
-  let canvasScale = $state(1);
   let resizeObserver: ResizeObserver | null = null;
 
-  function updateCanvasScale() {
-    if (!stageEl) return;
-    // clientWidth/Height (NOT getBoundingClientRect) — the app's .root has
-    // its own `transform: scale(1.5)`, and getBoundingClientRect reports
-    // POST-ancestor-transform viewport pixels while box.w/h are in the
-    // canvas's LOCAL (pre-transform) box space. clientWidth/Height stay in
-    // the local, untransformed coordinate space, matching box.w/h.
-    const cw = stageEl.clientWidth;
-    const ch = stageEl.clientHeight;
-    if (cw <= 0 || ch <= 0) return;
-    canvasScale = Math.min(1, cw / box.w, ch / box.h);
+  // .root's own CSS transform (page-shell.css) — clientWidth/Height are
+  // measured in the space *inside* this transform, but what actually hits
+  // the screen is that times this scale.
+  const ROOT_SCALE = 1.5;
+
+  function measureTargetLongSide(): number {
+    const side = stageEl ? Math.max(stageEl.clientWidth, stageEl.clientHeight) * ROOT_SCALE : 0;
+    return Math.min(PLAYBACK_BOUND_MAX, Math.max(PLAYBACK_BOUND_MIN, side || PLAYBACK_BOUND_MIN));
   }
+
+  // Re-requests the stream at the current position, at the new target
+  // resolution, whenever .stage's measured size changes the *transcode*
+  // target (see `box` above) — fires on any resize, e.g. the fullscreen
+  // toggle button right in this component. A no-op for a remuxed clip
+  // (server-side box is ignored there), but cheap either way, and this
+  // component has no way to know in advance which path a given clip will
+  // take.
+  function handleStageResize() {
+    const nextBox = computePlaybackBox(clip, measureTargetLongSide());
+    if (nextBox.w === box.w && nextBox.h === box.h) return;
+    box = nextBox;
+    if (!started) return;
+    doSeek(absolutePosition, nextBox);
+  }
+
+  $effect(() => {
+    if (videoEl) videoEl.volume = $volume;
+  });
 
   // Progress bar — self-contained rather than reusing ProgressBar.svelte,
   // which is tightly coupled to player.ts's currentTrack/duration/position
-  // (clip playback deliberately bypasses that store, see clips.ts).
+  // (clip playback deliberately bypasses that store).
   let barEl = $state<HTMLButtonElement | null>(null);
   let isDragging = $state(false);
   let dragPosition = $state(0);
@@ -86,14 +142,14 @@
   }
 
   function clampPosition(clientX: number): number {
-    if (!barEl || $clipDuration <= 0) return 0;
+    if (!barEl || clipDurationVal <= 0) return 0;
     const rect = barEl.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return ratio * $clipDuration;
+    return ratio * clipDurationVal;
   }
 
   function handlePointerDown(event: PointerEvent) {
-    if ($clipDuration <= 0 || !barEl) return;
+    if (clipDurationVal <= 0 || !barEl) return;
     activePointerId = event.pointerId;
     isDragging = true;
     dragPosition = clampPosition(event.clientX);
@@ -116,80 +172,9 @@
     await doSeek(next);
   }
 
-  // `started`: true once a frame belonging to the current decode has
-  // actually arrived (gates the initial-load placeholder). `seeking`: true
-  // from the moment a seek is requested until a frame belonging to *that*
-  // seek arrives (gates the lighter buffering overlay).
-  //
-  // Every frame's bytes are prefixed on the Rust side with an 8-byte
-  // generation tag (see clip_video.rs's tick()) that channel.onmessage
-  // checks against this component's own `generation` counter before
-  // accepting it. Needed because frames stream continuously during
-  // playback, so one from the *previous* position is essentially always
-  // still in flight over IPC at the moment a seek is requested — without
-  // the tag there's no way to tell it apart from a genuinely new one, and
-  // treating "any frame arrived" as confirmation cleared `seeking` almost
-  // instantly while the real seek was still 1-3s out, which just read as
-  // "the picture hangs." `generation` is bumped synchronously (no `await`
-  // in between) right before each Start/Seek call and passed through as a
-  // parameter, so channel.onmessage always compares against the request
-  // that's actually in flight, not a stale snapshot.
-  let started = $state(false);
-  let seeking = $state(false);
-  let generation = 0;
-
-  async function doSeek(secs: number, targetBox: { w: number; h: number } = box) {
-    generation++;
-    seeking = true;
-    await seekClip(secs, generation, targetBox);
-  }
-
-  // .root's own CSS transform (page-shell.css) — clientWidth/Height are
-  // measured in the space *inside* this transform, but what actually hits
-  // the screen is that times this scale. Missing this the first time
-  // under-targeted the decode resolution by exactly this factor (measured
-  // ~633px internal for the windowed case, displayed at ~950px physical) —
-  // visible softness, not just "slightly conservative."
-  const ROOT_SCALE = 1.5;
-
-  // Longer side of .stage's *actual* current layout box, converted to real
-  // screen pixels — measuring instead of guessing per view mode (was: 1280
-  // windowed / screen resolution fullscreen) targets exactly what's going
-  // to be displayed, whatever the window size, fullscreen or not.
-  // clientWidth/Height (not getBoundingClientRect) for the same reason
-  // updateCanvasScale uses them — .root's transform makes
-  // getBoundingClientRect report post-transform viewport pixels directly,
-  // but mixing that with box.w/h (which canvasScale math needs in the
-  // *local* pre-transform space) elsewhere is what this file avoids
-  // throughout; ROOT_SCALE applies the same correction explicitly, in one
-  // place, only for the decode-resolution target.
-  function measureTargetLongSide(): number {
-    const side = stageEl ? Math.max(stageEl.clientWidth, stageEl.clientHeight) * ROOT_SCALE : 0;
-    return Math.min(PLAYBACK_BOUND_MAX, Math.max(PLAYBACK_BOUND_MIN, side || PLAYBACK_BOUND_MIN));
-  }
-
-  // Re-seeks at the current position, at the new target resolution,
-  // whenever .stage's measured size actually changes the decode target
-  // (see `box` above) — fires on any resize, e.g. the fullscreen toggle
-  // button right in this component. Unconditional rather than gated on
-  // readiness — a Seek always tears down and restarts whatever decode is
-  // currently in flight on the backend (clip_video.rs), so it's safe to
-  // fire even mid-initial-buffering; it just means the fresh box wins over
-  // whatever the original Start was using.
-  function handleStageResize() {
-    updateCanvasScale();
-    const nextBox = computePlaybackBox(clip, measureTargetLongSide());
-    if (nextBox.w === box.w && nextBox.h === box.h) return;
-    box = nextBox;
-    if (!renderer) return;
-    renderer.resize(nextBox.w, nextBox.h);
-    updateCanvasScale();
-    doSeek($clipPosition, nextBox);
-  }
-
-  let canSeek = $derived($clipDuration > 0);
-  let displayPosition = $derived(isDragging ? dragPosition : $clipPosition);
-  let pct = $derived($clipDuration > 0 ? (displayPosition / $clipDuration) * 100 : 0);
+  let canSeek = $derived(clipDurationVal > 0);
+  let displayPosition = $derived(isDragging ? dragPosition : absolutePosition);
+  let pct = $derived(clipDurationVal > 0 ? (displayPosition / clipDurationVal) * 100 : 0);
 
   // Controls (including the close button, top-right) auto-hide on
   // inactivity and reappear on ANY mouse movement — a bottom-half-only
@@ -206,18 +191,42 @@
     hideTimer = setTimeout(() => (controlsVisible = false), 2500);
   }
 
-  function draw() {
-    renderer?.draw();
-    rafId = requestAnimationFrame(draw);
+  function onTimeUpdate() {
+    playedSecs = videoEl.currentTime;
+  }
+
+  function onWaiting() {
+    buffering = true;
+  }
+
+  function onPlaying() {
+    buffering = false;
+    started = true;
+  }
+
+  // Fires once the frame at the current position is actually decoded and
+  // ready to paint — the clear signal for a seek made *while paused*
+  // (doSeek doesn't call play() then, so `playing` never fires; without
+  // this, the placeholder would stay up forever after a paused seek).
+  function onLoadedData() {
+    buffering = false;
+    started = true;
+  }
+
+  function onPlayEvt() {
+    isPlaying = true;
+  }
+
+  function onPauseEvt() {
+    isPlaying = false;
   }
 
   onMount(async () => {
+    await prepareClipPlayback();
+
     // Real measurement now that .stage actually exists and is laid out —
     // the $state initializer above only had a placeholder to work with.
     box = computePlaybackBox(clip, measureTargetLongSide());
-    renderer = new FrameRenderer(canvas, box.w, box.h);
-
-    updateCanvasScale();
     if (stageEl) {
       // Also fires once immediately on observe() with the current size —
       // harmless no-op here since box already matches (just measured
@@ -227,48 +236,53 @@
       resizeObserver.observe(stageEl);
     }
 
-    const channel = new Channel<ArrayBuffer>();
-    channel.onmessage = (data) => {
-      // First 8 bytes are the generation tag (little-endian u64); the rest
-      // is the raw RGBA payload FrameRenderer expects. Discard anything
-      // not tagged for the request currently in flight — see the
-      // `generation` comment above.
-      const frameGen = new DataView(data).getBigUint64(0, true);
-      if (frameGen !== BigInt(generation)) return;
-      renderer?.uploadFrame(data, 8);
-      started = true;
-      seeking = false;
-    };
+    videoEl.volume = $volume;
+    videoEl.addEventListener("timeupdate", onTimeUpdate);
+    videoEl.addEventListener("waiting", onWaiting);
+    videoEl.addEventListener("playing", onPlaying);
+    videoEl.addEventListener("loadeddata", onLoadedData);
+    videoEl.addEventListener("play", onPlayEvt);
+    videoEl.addEventListener("pause", onPauseEvt);
+    videoEl.addEventListener("ended", close);
 
-    generation++;
-    await playClip(clip, channel, generation, box);
-    isPlaying = true;
-    rafId = requestAnimationFrame(draw);
+    videoEl.src = await buildClipStreamUrl(clip.path, 0, box);
+    videoEl.load();
+    try {
+      await videoEl.play();
+    } catch {
+      /* autoplay rejection — user can hit play */
+    }
 
     hideTimer = setTimeout(() => (controlsVisible = false), 2500);
   });
 
   onDestroy(() => {
-    if (rafId) cancelAnimationFrame(rafId);
     if (hideTimer) clearTimeout(hideTimer);
     resizeObserver?.disconnect();
-    stopClip();
-    renderer?.dispose();
+    if (videoEl) {
+      videoEl.removeEventListener("timeupdate", onTimeUpdate);
+      videoEl.removeEventListener("waiting", onWaiting);
+      videoEl.removeEventListener("playing", onPlaying);
+      videoEl.removeEventListener("loadeddata", onLoadedData);
+      videoEl.removeEventListener("play", onPlayEvt);
+      videoEl.removeEventListener("pause", onPauseEvt);
+      videoEl.removeEventListener("ended", close);
+      // Forces the in-flight HTTP request to abort immediately (rather
+      // than whenever GC gets around to dropping the element), so the
+      // server-side ffmpeg process (transcode or remux) is killed
+      // promptly — see clip_stream_server.rs's ChildGuard.
+      videoEl.pause();
+      videoEl.removeAttribute("src");
+      videoEl.load();
+    }
   });
 
-  // clip_video/audio report end-of-stream via clipFinished — close automatically.
-  $effect(() => {
-    if ($clipFinished) close();
-  });
-
-  async function togglePlayPause() {
+  function togglePlayPause() {
     playUiSfx("confirm");
-    if (isPlaying) {
-      await pauseClip();
-      isPlaying = false;
+    if (videoEl.paused) {
+      videoEl.play().catch(() => {});
     } else {
-      await resumeClip();
-      isPlaying = true;
+      videoEl.pause();
     }
   }
 
@@ -295,8 +309,8 @@
   }
 
   export async function gamepadSeekBy(deltaSecs: number) {
-    if ($clipDuration <= 0) return;
-    const next = Math.max(0, Math.min($clipDuration, $clipPosition + deltaSecs));
+    if (clipDurationVal <= 0) return;
+    const next = Math.max(0, Math.min(clipDurationVal, absolutePosition + deltaSecs));
     await doSeek(next);
   }
 </script>
@@ -339,22 +353,14 @@
   </button>
 
   <div class="stage" bind:this={stageEl}>
-    <canvas
-      bind:this={canvas}
-      width={box.w}
-      height={box.h}
-      style={canvasScale < 0.999 ? `transform: scale(${canvasScale})` : ""}
-    ></canvas>
+    <!-- svelte-ignore a11y_media_has_caption -->
+    <video bind:this={videoEl} playsinline></video>
 
-    {#if !started}
+    {#if !started || buffering}
       <div class="load-placeholder">
         {#if clip.thumbnail}
           <img class="load-thumb" src={convertFileSrc(clip.thumbnail)} alt="" />
         {/if}
-        <div class="spinner"></div>
-      </div>
-    {:else if seeking}
-      <div class="seek-overlay">
         <div class="spinner"></div>
       </div>
     {/if}
@@ -381,7 +387,7 @@
         <div class="fill" class:fill--dragging={isDragging} style={`width:${pct}%`}></div>
         <div class="thumb" class:thumb--dragging={isDragging} style={`left:${pct}%`}></div>
       </button>
-      <span class="time">{fmt($clipDuration)}</span>
+      <span class="time">{fmt(clipDurationVal)}</span>
     </div>
 
     <div class="controls-row">
@@ -472,16 +478,20 @@
     min-height: 0;
   }
 
-  .load-placeholder,
-  .seek-overlay {
+  video {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    background: #000;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .load-placeholder {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-  }
-
-  .load-placeholder {
     background: #0a0a10;
   }
 
@@ -493,10 +503,6 @@
     object-fit: contain;
     filter: blur(10px) brightness(0.5);
     transform: scale(1.05);
-  }
-
-  .seek-overlay {
-    background: rgba(10, 10, 16, 0.45);
   }
 
   .spinner {
@@ -513,16 +519,6 @@
     to {
       transform: rotate(360deg);
     }
-  }
-
-  canvas {
-    /* Rendered at its native backing size (box.w/box.h) and fit into .stage
-       via a JS-computed `transform: scale()` (see canvasScale/
-       updateCanvasScale) rather than CSS width/height + object-fit — see
-       the canvasScale comment above for why. */
-    display: block;
-    background: #000;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   }
 
   .title-bar {

@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import { invoke, Channel } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { Clip } from '../types';
 import { stop as stopMusic } from './player';
@@ -9,19 +9,43 @@ const CLIP_FOLDERS_KEY = 'mp_clip_folders';
 // Sanity clamp around whatever ClipPlayerView measures as the actually-
 // available display area (see `measureTargetLongSide` there, driven by a
 // ResizeObserver on .stage — covers windowed, fullscreen, and mini modes
-// uniformly by measuring instead of guessing per view mode). Floor: never
-// decode below what even the small windowed view already needs, regardless
-// of a transient 0 mid-layout. Ceiling: never chase decode cost for a
-// panel bigger than this raw-frame-over-IPC pipeline can actually sustain
-// — measured live: ffmpeg + WebKitWebProcess + this app's own backend
-// thread all pegged simultaneously once frames grew past ~1920x1440,
-// despite the same source decoding at 100+ fps standalone with nowhere
-// near that output size (the bottleneck is per-frame copy/IPC bandwidth,
-// not decode). Sizing to the *actual* display area (rather than the full
-// monitor resolution) already avoids most of the waste that used to push
-// fullscreen past this ceiling; the ceiling stays as a last-resort backstop.
+// uniformly by measuring instead of guessing per view mode). Only matters
+// for the *transcode* fallback path (see buildClipStreamUrl/
+// clip_stream_server.rs) — a remux can't be scaled at all, it always
+// sends the source's own resolution and lets the browser's own decode+
+// display handle downscaling, same as any normal video player. Floor:
+// never decode below what even the small windowed view already needs,
+// regardless of a transient 0 mid-layout. Ceiling: never chase transcode
+// CPU cost for a panel bigger than realtime VP9 encoding can actually
+// sustain on modest hardware — measured live: encoding alone pegged 5+
+// CPU cores at 1920x1440 on a 12-core desktop.
 export const PLAYBACK_BOUND_MIN = 640;
 export const PLAYBACK_BOUND_MAX = 1920;
+
+// HTMLMediaElement.canPlayType() reflects whatever the actual playback
+// engine can decode on this machine right now — WebKitGTK's GStreamer
+// plugin set on Linux, WebView2/Media Foundation on Windows — correctly
+// and portably, without this app needing separate per-OS/per-distro
+// codec-availability detection. Backs clip_stream_server.rs's remux
+// decision: a clip already in one of these codecs gets stream-copied
+// (near-free) instead of live-transcoded to VP9 (several CPU cores,
+// realtime, for the duration of playback) — see is_remux_safe there.
+const VIDEO_CODEC_PROBES: Array<{ family: string; mimeCodec: string }> = [
+  { family: 'vp9', mimeCodec: 'video/webm; codecs="vp9"' },
+  { family: 'av1', mimeCodec: 'video/webm; codecs="av01.0.05M.08"' },
+];
+
+let cachedPlayableCodecs: string[] | null = null;
+
+export function getPlayableVideoCodecs(): string[] {
+  if (!cachedPlayableCodecs) {
+    const probe = document.createElement('video');
+    cachedPlayableCodecs = VIDEO_CODEC_PROBES
+      .filter(({ mimeCodec }) => probe.canPlayType(mimeCodec) !== '')
+      .map(({ family }) => family);
+  }
+  return cachedPlayableCodecs;
+}
 
 /**
  * Aspect-fits a clip's source resolution into a `longSide`-capped box,
@@ -190,121 +214,43 @@ export function clearClipLibrary() {
   invoke('clear_clip_thumbs').catch(() => {});
 }
 
-// ── Playback (paired audio + video transport) ─────────────────────────────────
+// ── Playback (native <video>, streamed from a local HTTP server) ──────────────
 //
-// Wraps the audio (existing audio_* commands, reused as-is) and video
-// (clip_video_* commands) invokes together so callers never drive the two
-// transports separately and risk them drifting out of sync.
+// clip_stream_server.rs serves the requested clip either stream-copied
+// (remuxed, near-free) or live-transcoded to VP9/Opus WebM depending on
+// getPlayableVideoCodecs(); ClipPlayerView plays that URL directly through
+// a normal <video> element. Audio+video are one muxed stream, so unlike
+// player.ts's music playback there's no separate rodio/audio_* transport
+// to keep in sync here — the browser's own <video> element owns decode,
+// timing, and AV sync entirely. Position/duration are read straight off
+// the element (video.currentTime/duration) rather than tracked in a store
+// here; see ClipPlayerView for that.
 
-export const clipPosition = writable(0);
-export const clipDuration = writable(0);
-export const clipFinished = writable(false);
+let streamInfo: { port: number; token: string } | null = null;
 
-let resyncTimer: ReturnType<typeof setInterval> | null = null;
-
-function startResyncLoop() {
-  stopResyncLoop();
-  resyncTimer = setInterval(async () => {
-    try {
-      const pos = await invoke<number>('audio_get_position');
-      clipPosition.set(pos);
-      await invoke('clip_video_resync', { audioPos: pos });
-      if (await invoke<boolean>('audio_is_finished')) {
-        clipFinished.set(true);
-      }
-    } catch {
-      // audio may have stopped on its own — treat as finished
-      clipFinished.set(true);
-    }
-  }, 500);
-}
-
-function stopResyncLoop() {
-  if (resyncTimer) {
-    clearInterval(resyncTimer);
-    resyncTimer = null;
+async function getStreamInfo(): Promise<{ port: number; token: string }> {
+  if (!streamInfo) {
+    const [port, token] = await invoke<[number, string]>('get_clip_stream_info');
+    streamInfo = { port, token };
   }
+  return streamInfo;
 }
 
-// `generation` is caller-supplied (see ClipPlayerView.svelte) rather than
-// generated in here or on the Rust side. The Rust clip-video decode thread
-// is a single long-lived, app-lifetime object spawned once — an
-// independent counter there would keep climbing across every clip ever
-// opened in the session, while a per-ClipPlayerView-instance counter on the
-// frontend resets fresh per mount; the two only ever agreed for the very
-// first clip played after app start; everything after mismatched and got
-// silently ignored (the generation tag never matched, so `started` never
-// flipped true — the clip player looked like it had just vanished, stuck
-// on its loading placeholder forever). Letting the caller own the number
-// and simply echoing it back sidesteps needing either side to
-// independently track a shared sequence.
-export async function playClip(
-  clip: Clip,
-  channel: InstanceType<typeof Channel<ArrayBuffer>>,
-  generation: number,
-  box: { w: number; h: number },
-): Promise<void> {
-  // Opening a clip stops whatever music was playing — a track can't sanely
-  // play under the clip's own audio track — and does NOT auto-resume it on
-  // close (surprising). See stopClip below.
-  await stopMusic();
-
-  clipPosition.set(0);
-  clipDuration.set(clip.duration || 0);
-  clipFinished.set(false);
-
-  const { w, h } = box;
-
-  // Fired together, not one `await`ed before the other starting — video
-  // decode/seek is inherently slower than audio's, and awaiting audio_play
-  // first was adding audio's own latency on top of that gap for no reason,
-  // making video's already-later start later still.
-  await Promise.all([
-    invoke('audio_play', { path: clip.path, duration: clip.duration || 36000 }),
-    invoke('clip_video_start', {
-      path: clip.path,
-      seekSecs: 0,
-      maxW: w,
-      maxH: h,
-      channel,
-      generation,
-    }),
-  ]);
-  startResyncLoop();
+/** Builds the clip-stream URL for `path`, starting at `seekSecs`, sized to `box` (transcode-path only, see PLAYBACK_BOUND_MAX). */
+export async function buildClipStreamUrl(path: string, seekSecs: number, box: { w: number; h: number }): Promise<string> {
+  const { port, token } = await getStreamInfo();
+  const params = new URLSearchParams({
+    token,
+    path,
+    seek: seekSecs.toFixed(3),
+    w: String(box.w),
+    h: String(box.h),
+    playable: getPlayableVideoCodecs().join(','),
+  });
+  return `http://127.0.0.1:${port}/stream?${params.toString()}`;
 }
 
-export async function pauseClip(): Promise<void> {
-  await invoke('audio_pause');
-  await invoke('clip_video_pause');
-}
-
-export async function resumeClip(): Promise<void> {
-  await invoke('audio_resume');
-  await invoke('clip_video_resume');
-}
-
-// `box` is re-supplied on every seek, not just Start — ClipPlayerView also
-// uses a seek (at the current position) to switch decode resolution when
-// entering/leaving fullscreen mid-clip, so the backend needs to be told a
-// (possibly new) target size here too rather than assuming it's unchanged
-// from whatever Start used.
-export async function seekClip(secs: number, generation: number, box: { w: number; h: number }): Promise<void> {
-  clipPosition.set(secs); // optimistic — resync loop only polls every 500ms
-  // Same reasoning as playClip: fire together rather than awaiting audio's
-  // seek before even starting video's, which was adding pure dead time to
-  // video's already-slower restart.
-  await Promise.all([
-    invoke('audio_seek', { position: secs }),
-    invoke('clip_video_seek', { seekSecs: secs, generation, maxW: box.w, maxH: box.h }),
-  ]);
-}
-
-export async function stopClip(): Promise<void> {
-  stopResyncLoop();
-  await invoke('clip_video_stop');
-  await invoke('audio_stop');
-  selectedClip.set(null);
-  clipPosition.set(0);
-  clipDuration.set(0);
-  clipFinished.set(false);
-}
+// Opening a clip stops whatever music was playing — a track can't sanely
+// play under the clip's own audio track — and does NOT auto-resume it on
+// close (surprising, but matches the old playClip's behavior).
+export { stopMusic as prepareClipPlayback };

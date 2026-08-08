@@ -44,6 +44,7 @@ tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 discord-rich-presence = "0.2.4"
 any_ascii = "0.3.3"
+tiny_http = "0.12"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.58.0"
