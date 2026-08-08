@@ -614,7 +614,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="root" class:mode-mini={$viewMode === "mini"}>
+<div class="root" class:mode-mini={$viewMode === "mini"} class:clip-open={!!$selectedClip}>
   {#if isDragOver}
     <div class="drag-overlay">
       <div class="drag-overlay-inner">

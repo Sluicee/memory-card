@@ -11,19 +11,16 @@ const CLIP_FOLDERS_KEY = 'mp_clip_folders';
 // the clip's own aspect ratio (from the scanner-probed width/height),
 // capped at this longer side.
 //
-// 640 is a deliberate, diagnosed choice, not an arbitrary bandwidth-safe
-// number. On this dev machine's WebKitGTK+NVIDIA combination, canvas
-// compositing throughput craters somewhere between ~230K px (640x360,
-// consistently smooth ~24fps across every isolated test) and ~507K px
-// (950x534, consistently throttled to ~11fps) — independent of *how* the
-// canvas reaches that pixel count (larger backing texture and CSS-scaling
-// a small texture up both triggered it equally in controlled tests). This
-// is a platform/driver-level compositor limit, not something fixable from
-// app code — see the memory/plan notes for the full diagnostic trail.
-// Revisit this bound if a fix surfaces upstream, or per-platform if this
-// turns out to be Linux/WebKitGTK-specific (Windows uses WebView2, a
-// completely different engine, and should be tested separately).
-const PLAYBACK_BOUND = 640;
+// Was 640, on the theory that canvas compositing throughput on this dev
+// machine's WebKitGTK+NVIDIA combo craters above ~230K displayed px — see
+// the memory/plan notes for that trail. Diagnosed 2026-08-08 as a false
+// lead: the actual bottleneck was `.root`'s CSS `filter` (blur+saturate+
+// contrast) and `body::after`'s full-viewport scanline/vignette overlay,
+// both forcing a full-frame software recomposite every tick regardless of
+// canvas size — not the canvas/decode resolution itself. With those fixed,
+// this bound is just an actual bandwidth/decode-cost cap again; raise it
+// if quality matters more than decode cost for a given clip library.
+const PLAYBACK_BOUND = 1280;
 
 /** Aspect-fits a clip's source resolution into a PLAYBACK_BOUND-capped box, rounded to even pixels (ffmpeg-friendly). */
 export function computePlaybackBox(clip: Clip): { w: number; h: number } {
