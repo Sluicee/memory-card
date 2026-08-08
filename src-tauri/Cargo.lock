@@ -2509,6 +2509,7 @@ dependencies = [
  "tiny_http",
  "tokio",
  "walkdir",
+ "webkit2gtk",
  "windows 0.58.0",
 ]
 

@@ -414,6 +414,53 @@ pub fn run() {
 
             let clip_stream_server = clip_stream_server::start(app.handle().clone());
             app.manage(clip_stream_server);
+
+            // WebKitGTK defaults to hardware-acceleration-policy=OnDemand,
+            // which decides per-page whether accelerated (GL) compositing is
+            // worth enabling — and for this app's page, it was landing on
+            // "no": live-profiled during clip playback (perf report +
+            // GST_DEBUG), the video sink instantiated was `webkitvideosink`
+            // (the software Cairo/pixman path), never `webkitglvideosink`,
+            // which WebKitGTK only picks when accelerated compositing is
+            // already active for the page (MediaPlayerPrivateGStreamer's
+            // m_renderingCanBeAccelerated). That software path's per-frame
+            // cost (visible in the perf report as ~16% in libpixman plus
+            // ~20%+ in kernel shmem/page-fault paths — a fresh CPU-side
+            // buffer per frame) is what was capping clip fullscreen
+            // playback well under the source frame rate, independent of
+            // clip resolution or codec — a page-level rendering-mode
+            // decision, not anything about the video itself.
+            //
+            // Tauri doesn't expose this WebKitSettings property itself
+            // (open feature request: tauri-apps/tauri#14424), so this
+            // reaches into the raw WebKitWebView via `with_webview` to set
+            // it directly. Linux-only: this is specifically a WebKitGTK
+            // compositing-mode setting, meaningless on Windows (WebView2)
+            // and macOS (WKWebView, not exposed the same way even if it
+            // used the same underlying engine).
+            //
+            // CONFIRMED INEFFECTIVE on NVIDIA-proprietary-driver + WebKitGTK
+            // systems (live gdb'd: webkit_settings_get_hardware_acceleration_policy
+            // reads back NEVER immediately after this call sets ALWAYS). Root
+            // cause traced to WebKit's own HardwareAccelerationManager, which
+            // decides GL is unavailable during its own lazy static init, before
+            // any app code runs, and caches that decision for the process
+            // lifetime — no public API can override it after the fact. This is
+            // a known, unresolved upstream WebKitGTK/NVIDIA DMA-BUF interaction
+            // issue (see tauri-apps/tauri#9394 and related reports across other
+            // WebKitGTK-based apps), not something this app can fix. Kept as a
+            // harmless no-op here for portability to setups where the WebKit
+            // build/driver combination actually honors it.
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.with_webview(|webview| {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_hardware_acceleration_policy(webkit2gtk::HardwareAccelerationPolicy::Always);
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

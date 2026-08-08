@@ -46,6 +46,18 @@ discord-rich-presence = "0.2.4"
 any_ascii = "0.3.3"
 tiny_http = "0.12"
 
+# Reaches into the raw WebKitWebView (via Webview::with_webview, see lib.rs)
+# to force hardware-acceleration-policy=Always — Tauri doesn't expose this
+# WebKitSettings property itself (open feature request: tauri-apps/tauri#14424).
+# Pinned to match wry's own already-locked webkit2gtk version (see
+# Cargo.lock) — wry hands back a webkit2gtk::WebView value from its own
+# dependency on this crate, so ours must be the exact same version for
+# that type (and its WebViewExt/SettingsExt trait impls) to line up; a
+# different version is a different, incompatible Rust type even with an
+# identical name.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "=2.0.2"
+
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.58.0"
 features = [
