@@ -74,14 +74,15 @@ pub fn clip_video_start(
     max_w: u32,
     max_h: u32,
     channel: Channel<Response>,
+    generation: u64,
     state: State<SharedClipVideo>,
 ) -> Result<(), String> {
-    state.start(path, seek_secs, max_w, max_h, channel)
+    state.start(path, seek_secs, max_w, max_h, channel, generation)
 }
 
 #[tauri::command]
-pub fn clip_video_seek(seek_secs: f64, state: State<SharedClipVideo>) {
-    state.seek(seek_secs);
+pub fn clip_video_seek(seek_secs: f64, generation: u64, max_w: u32, max_h: u32, state: State<SharedClipVideo>) {
+    state.seek(seek_secs, generation, max_w, max_h);
 }
 
 #[tauri::command]

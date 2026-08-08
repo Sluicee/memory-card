@@ -7,6 +7,11 @@
   overflow: hidden;
   filter: saturate(0.82) contrast(1.08) brightness(0.97) blur(0.4px);
   image-rendering: crisp-edges;
+  /* .clip-open flips `filter` off/on (see below) — transition it instead of
+     snapping, so the CRT look doesn't visibly cut in/out. A few hundred ms
+     of an animating filter is a one-off cost, unlike having it on
+     permanently during clip playback (see the .root::after comment). */
+  transition: filter 0.25s ease;
 }
 
 .root.mode-mini {

@@ -6,27 +6,37 @@ import { stop as stopMusic } from './player';
 
 const CLIP_FOLDERS_KEY = 'mp_clip_folders';
 
-// Longer-side cap in pixels. The backend's ffmpeg pipe (clip_video.rs)
-// fits+pads whatever box it's given, so compute a per-clip box that matches
-// the clip's own aspect ratio (from the scanner-probed width/height),
-// capped at this longer side.
-//
-// Was 640, on the theory that canvas compositing throughput on this dev
-// machine's WebKitGTK+NVIDIA combo craters above ~230K displayed px — see
-// the memory/plan notes for that trail. Diagnosed 2026-08-08 as a false
-// lead: the actual bottleneck was `.root`'s CSS `filter` (blur+saturate+
-// contrast) and `body::after`'s full-viewport scanline/vignette overlay,
-// both forcing a full-frame software recomposite every tick regardless of
-// canvas size — not the canvas/decode resolution itself. With those fixed,
-// this bound is just an actual bandwidth/decode-cost cap again; raise it
-// if quality matters more than decode cost for a given clip library.
-const PLAYBACK_BOUND = 1280;
+// Sanity clamp around whatever ClipPlayerView measures as the actually-
+// available display area (see `measureTargetLongSide` there, driven by a
+// ResizeObserver on .stage — covers windowed, fullscreen, and mini modes
+// uniformly by measuring instead of guessing per view mode). Floor: never
+// decode below what even the small windowed view already needs, regardless
+// of a transient 0 mid-layout. Ceiling: never chase decode cost for a
+// panel bigger than this raw-frame-over-IPC pipeline can actually sustain
+// — measured live: ffmpeg + WebKitWebProcess + this app's own backend
+// thread all pegged simultaneously once frames grew past ~1920x1440,
+// despite the same source decoding at 100+ fps standalone with nowhere
+// near that output size (the bottleneck is per-frame copy/IPC bandwidth,
+// not decode). Sizing to the *actual* display area (rather than the full
+// monitor resolution) already avoids most of the waste that used to push
+// fullscreen past this ceiling; the ceiling stays as a last-resort backstop.
+export const PLAYBACK_BOUND_MIN = 640;
+export const PLAYBACK_BOUND_MAX = 1920;
 
-/** Aspect-fits a clip's source resolution into a PLAYBACK_BOUND-capped box, rounded to even pixels (ffmpeg-friendly). */
-export function computePlaybackBox(clip: Clip): { w: number; h: number } {
-  const srcW = clip.width || 16;
-  const srcH = clip.height || 9;
-  const scale = PLAYBACK_BOUND / Math.max(srcW, srcH);
+/**
+ * Aspect-fits a clip's source resolution into a `longSide`-capped box,
+ * rounded to even pixels (ffmpeg-friendly). Never scales *up* past the
+ * clip's native resolution — `Math.min(1, ...)` was missing before, so any
+ * clip with a longer side under the bound (a plausible size for a lot of
+ * real clip sources) got upscaled by ffmpeg's own `scale=` filter to
+ * exactly fill it, decoding and displaying it visibly blockier than the
+ * source ever was — most obvious full-window in fullscreen mode, where
+ * canvasScale is closer to 1 and doesn't shrink that blockiness back down.
+ */
+export function computePlaybackBox(clip: Clip, longSide: number): { w: number; h: number } {
+  const srcW = clip.width || longSide;
+  const srcH = clip.height || Math.round((longSide * 9) / 16);
+  const scale = Math.min(1, longSide / Math.max(srcW, srcH));
   const w = Math.max(2, Math.round((srcW * scale) / 2) * 2);
   const h = Math.max(2, Math.round((srcH * scale) / 2) * 2);
   return { w, h };
@@ -216,7 +226,24 @@ function stopResyncLoop() {
   }
 }
 
-export async function playClip(clip: Clip, channel: InstanceType<typeof Channel<ArrayBuffer>>): Promise<void> {
+// `generation` is caller-supplied (see ClipPlayerView.svelte) rather than
+// generated in here or on the Rust side. The Rust clip-video decode thread
+// is a single long-lived, app-lifetime object spawned once — an
+// independent counter there would keep climbing across every clip ever
+// opened in the session, while a per-ClipPlayerView-instance counter on the
+// frontend resets fresh per mount; the two only ever agreed for the very
+// first clip played after app start; everything after mismatched and got
+// silently ignored (the generation tag never matched, so `started` never
+// flipped true — the clip player looked like it had just vanished, stuck
+// on its loading placeholder forever). Letting the caller own the number
+// and simply echoing it back sidesteps needing either side to
+// independently track a shared sequence.
+export async function playClip(
+  clip: Clip,
+  channel: InstanceType<typeof Channel<ArrayBuffer>>,
+  generation: number,
+  box: { w: number; h: number },
+): Promise<void> {
   // Opening a clip stops whatever music was playing — a track can't sanely
   // play under the clip's own audio track — and does NOT auto-resume it on
   // close (surprising). See stopClip below.
@@ -226,16 +253,23 @@ export async function playClip(clip: Clip, channel: InstanceType<typeof Channel<
   clipDuration.set(clip.duration || 0);
   clipFinished.set(false);
 
-  const { w, h } = computePlaybackBox(clip);
+  const { w, h } = box;
 
-  await invoke('audio_play', { path: clip.path, duration: clip.duration || 36000 });
-  await invoke('clip_video_start', {
-    path: clip.path,
-    seekSecs: 0,
-    maxW: w,
-    maxH: h,
-    channel,
-  });
+  // Fired together, not one `await`ed before the other starting — video
+  // decode/seek is inherently slower than audio's, and awaiting audio_play
+  // first was adding audio's own latency on top of that gap for no reason,
+  // making video's already-later start later still.
+  await Promise.all([
+    invoke('audio_play', { path: clip.path, duration: clip.duration || 36000 }),
+    invoke('clip_video_start', {
+      path: clip.path,
+      seekSecs: 0,
+      maxW: w,
+      maxH: h,
+      channel,
+      generation,
+    }),
+  ]);
   startResyncLoop();
 }
 
@@ -249,10 +283,20 @@ export async function resumeClip(): Promise<void> {
   await invoke('clip_video_resume');
 }
 
-export async function seekClip(secs: number): Promise<void> {
+// `box` is re-supplied on every seek, not just Start — ClipPlayerView also
+// uses a seek (at the current position) to switch decode resolution when
+// entering/leaving fullscreen mid-clip, so the backend needs to be told a
+// (possibly new) target size here too rather than assuming it's unchanged
+// from whatever Start used.
+export async function seekClip(secs: number, generation: number, box: { w: number; h: number }): Promise<void> {
   clipPosition.set(secs); // optimistic — resync loop only polls every 500ms
-  await invoke('audio_seek', { position: secs });
-  await invoke('clip_video_seek', { seekSecs: secs });
+  // Same reasoning as playClip: fire together rather than awaiting audio's
+  // seek before even starting video's, which was adding pure dead time to
+  // video's already-slower restart.
+  await Promise.all([
+    invoke('audio_seek', { position: secs }),
+    invoke('clip_video_seek', { seekSecs: secs, generation, maxW: box.w, maxH: box.h }),
+  ]);
 }
 
 export async function stopClip(): Promise<void> {

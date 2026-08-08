@@ -59,16 +59,28 @@ export class FrameRenderer {
     gl.viewport(0, 0, width, height);
   }
 
-  /** Uploads a frame's raw RGBA bytes into the texture. Does not draw. */
-  uploadFrame(data: ArrayBuffer): void {
+  /**
+   * Uploads a frame's raw RGBA bytes into the texture. Does not draw.
+   * `byteOffset` (default 0) lets callers pass a buffer with a header
+   * before the pixel data (ClipPlayerView's 8-byte generation tag) without
+   * having to `.slice()` it off first — `new Uint8Array(buffer, offset,
+   * length)` is a view into the existing ArrayBuffer, not a copy, so this
+   * saves a full frame-sized copy (up to several MB, every frame) that a
+   * slice-then-upload approach would otherwise pay for on top of the copy
+   * WebGL itself already does getting the data to the GPU.
+   */
+  uploadFrame(data: ArrayBuffer, byteOffset = 0): void {
     const gl = this.gl;
     const expected = this.width * this.height * 4;
-    if (data.byteLength !== expected) {
-      console.warn(`FrameRenderer: frame size mismatch (got ${data.byteLength}, expected ${expected})`);
+    if (data.byteLength - byteOffset !== expected) {
+      console.warn(`FrameRenderer: frame size mismatch (got ${data.byteLength - byteOffset}, expected ${expected})`);
       return;
     }
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(data));
+    gl.texSubImage2D(
+      gl.TEXTURE_2D, 0, 0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE,
+      new Uint8Array(data, byteOffset, expected),
+    );
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
 

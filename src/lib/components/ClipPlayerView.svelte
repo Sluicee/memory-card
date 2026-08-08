@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { Channel } from "@tauri-apps/api/core";
+  import { Channel, convertFileSrc } from "@tauri-apps/api/core";
   import { FrameRenderer } from "$lib/webgl/FrameRenderer";
   import {
     playClip,
@@ -12,6 +12,8 @@
     clipDuration,
     clipFinished,
     computePlaybackBox,
+    PLAYBACK_BOUND_MIN,
+    PLAYBACK_BOUND_MAX,
   } from "$lib/stores/clips";
   import { viewMode } from "$lib/stores/viewMode";
   import VolumeControl from "./VolumeControl.svelte";
@@ -24,26 +26,33 @@
 
   // Each ClipPlayerView instance is remounted fresh per clip (see
   // +page.svelte's {#if $selectedClip}), so `clip` never changes within a
-  // single instance's lifetime — $derived here just silences the
-  // state_referenced_locally lint, not for reactivity.
-  const box = $derived(computePlaybackBox(clip));
+  // single instance's lifetime. `box` DOES change within a lifetime though
+  // — the decode target tracks the *actual* measured size of .stage (see
+  // measureTargetLongSide/handleStageResize below), not a per-view-mode
+  // guess, so it naturally covers windowed, fullscreen, and mini modes the
+  // same way. The fullscreen toggle button right in this component (see
+  // toggleFullscreen below) makes switching mode — and so resizing .stage
+  // — mid-clip a normal thing to do, not an edge case.
+  //
+  // Real measurement only happens once .stage exists (onMount) — this
+  // initial value is just a placeholder until then.
+  //
+  // svelte-ignore state_referenced_locally -- `clip` is a $props() value,
+  // stable for this component's whole lifetime (see above); only `box`
+  // itself needs to be reactive here, which it is ($state, reassigned by
+  // handleStageResize).
+  let box = $state(computePlaybackBox(clip, PLAYBACK_BOUND_MIN));
 
   let canvas: HTMLCanvasElement;
   let renderer: FrameRenderer | null = null;
   let isPlaying = $state(true);
   let rafId = 0;
 
-  // Diagnosed directly (see clips.ts's PLAYBACK_BOUND comment for the full
-  // trail): on this WebKitGTK+NVIDIA combination, canvas compositing
-  // throughput craters somewhere between ~230K and ~507K displayed pixels,
-  // regardless of *how* that pixel count is reached — a bigger backing
-  // texture and CSS-scaling a small texture up (whether via width/height+
-  // object-fit or via `transform: scale()`) all throttled equally in
-  // controlled tests. There is currently no way to display this clip
-  // larger than its native decoded size without reintroducing the
-  // throttle, so canvasScale only ever shrinks to fit (never grows beyond
-  // 1) — the video is centered at its natural size rather than stretched
-  // to fill the window on this platform.
+  // canvasScale only ever shrinks the canvas to fit .stage, never grows it
+  // past 1 — the canvas is already decoded at up to `box`'s target (see
+  // clips.ts), so stretching it further via CSS would just upscale and
+  // blur/block it for no benefit (ffmpeg's own scale= filter is what's
+  // responsible for filling the target box, per clip, up to that bound).
   let stageEl = $state<HTMLDivElement | null>(null);
   let canvasScale = $state(1);
   let resizeObserver: ResizeObserver | null = null;
@@ -104,7 +113,78 @@
     if (barEl?.hasPointerCapture(event.pointerId)) {
       barEl.releasePointerCapture(event.pointerId);
     }
-    await seekClip(next);
+    await doSeek(next);
+  }
+
+  // `started`: true once a frame belonging to the current decode has
+  // actually arrived (gates the initial-load placeholder). `seeking`: true
+  // from the moment a seek is requested until a frame belonging to *that*
+  // seek arrives (gates the lighter buffering overlay).
+  //
+  // Every frame's bytes are prefixed on the Rust side with an 8-byte
+  // generation tag (see clip_video.rs's tick()) that channel.onmessage
+  // checks against this component's own `generation` counter before
+  // accepting it. Needed because frames stream continuously during
+  // playback, so one from the *previous* position is essentially always
+  // still in flight over IPC at the moment a seek is requested — without
+  // the tag there's no way to tell it apart from a genuinely new one, and
+  // treating "any frame arrived" as confirmation cleared `seeking` almost
+  // instantly while the real seek was still 1-3s out, which just read as
+  // "the picture hangs." `generation` is bumped synchronously (no `await`
+  // in between) right before each Start/Seek call and passed through as a
+  // parameter, so channel.onmessage always compares against the request
+  // that's actually in flight, not a stale snapshot.
+  let started = $state(false);
+  let seeking = $state(false);
+  let generation = 0;
+
+  async function doSeek(secs: number, targetBox: { w: number; h: number } = box) {
+    generation++;
+    seeking = true;
+    await seekClip(secs, generation, targetBox);
+  }
+
+  // .root's own CSS transform (page-shell.css) — clientWidth/Height are
+  // measured in the space *inside* this transform, but what actually hits
+  // the screen is that times this scale. Missing this the first time
+  // under-targeted the decode resolution by exactly this factor (measured
+  // ~633px internal for the windowed case, displayed at ~950px physical) —
+  // visible softness, not just "slightly conservative."
+  const ROOT_SCALE = 1.5;
+
+  // Longer side of .stage's *actual* current layout box, converted to real
+  // screen pixels — measuring instead of guessing per view mode (was: 1280
+  // windowed / screen resolution fullscreen) targets exactly what's going
+  // to be displayed, whatever the window size, fullscreen or not.
+  // clientWidth/Height (not getBoundingClientRect) for the same reason
+  // updateCanvasScale uses them — .root's transform makes
+  // getBoundingClientRect report post-transform viewport pixels directly,
+  // but mixing that with box.w/h (which canvasScale math needs in the
+  // *local* pre-transform space) elsewhere is what this file avoids
+  // throughout; ROOT_SCALE applies the same correction explicitly, in one
+  // place, only for the decode-resolution target.
+  function measureTargetLongSide(): number {
+    const side = stageEl ? Math.max(stageEl.clientWidth, stageEl.clientHeight) * ROOT_SCALE : 0;
+    return Math.min(PLAYBACK_BOUND_MAX, Math.max(PLAYBACK_BOUND_MIN, side || PLAYBACK_BOUND_MIN));
+  }
+
+  // Re-seeks at the current position, at the new target resolution,
+  // whenever .stage's measured size actually changes the decode target
+  // (see `box` above) — fires on any resize, e.g. the fullscreen toggle
+  // button right in this component. Unconditional rather than gated on
+  // readiness — a Seek always tears down and restarts whatever decode is
+  // currently in flight on the backend (clip_video.rs), so it's safe to
+  // fire even mid-initial-buffering; it just means the fresh box wins over
+  // whatever the original Start was using.
+  function handleStageResize() {
+    updateCanvasScale();
+    const nextBox = computePlaybackBox(clip, measureTargetLongSide());
+    if (nextBox.w === box.w && nextBox.h === box.h) return;
+    box = nextBox;
+    if (!renderer) return;
+    renderer.resize(nextBox.w, nextBox.h);
+    updateCanvasScale();
+    doSeek($clipPosition, nextBox);
   }
 
   let canSeek = $derived($clipDuration > 0);
@@ -132,20 +212,36 @@
   }
 
   onMount(async () => {
+    // Real measurement now that .stage actually exists and is laid out —
+    // the $state initializer above only had a placeholder to work with.
+    box = computePlaybackBox(clip, measureTargetLongSide());
     renderer = new FrameRenderer(canvas, box.w, box.h);
 
     updateCanvasScale();
     if (stageEl) {
-      resizeObserver = new ResizeObserver(updateCanvasScale);
+      // Also fires once immediately on observe() with the current size —
+      // harmless no-op here since box already matches (just measured
+      // above), but is what picks up every later resize (fullscreen
+      // toggle, etc.).
+      resizeObserver = new ResizeObserver(handleStageResize);
       resizeObserver.observe(stageEl);
     }
 
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (data) => {
-      renderer?.uploadFrame(data);
+      // First 8 bytes are the generation tag (little-endian u64); the rest
+      // is the raw RGBA payload FrameRenderer expects. Discard anything
+      // not tagged for the request currently in flight — see the
+      // `generation` comment above.
+      const frameGen = new DataView(data).getBigUint64(0, true);
+      if (frameGen !== BigInt(generation)) return;
+      renderer?.uploadFrame(data, 8);
+      started = true;
+      seeking = false;
     };
 
-    await playClip(clip, channel);
+    generation++;
+    await playClip(clip, channel, generation, box);
     isPlaying = true;
     rafId = requestAnimationFrame(draw);
 
@@ -182,6 +278,17 @@
     onclose();
   }
 
+  // Duplicates ViewModeBar's fullscreen toggle (the top auto-hiding strip)
+  // right next to the close button — that strip is technically still
+  // reachable while a clip plays (higher z-index than .clip-player-root),
+  // but hovering the top-center edge while focused on a video isn't
+  // discoverable. Toggles between fullscreen and normal specifically,
+  // regardless of which of those two the app was in before the clip opened.
+  function toggleFullscreen() {
+    playUiSfx("confirm");
+    viewMode.set($viewMode === "fullscreen" ? "normal" : "fullscreen");
+  }
+
   // ── Gamepad API (called from +page.svelte's handleGamepadClipPlayer) ──────
   export function gamepadTogglePlayPause() {
     togglePlayPause();
@@ -190,15 +297,41 @@
   export async function gamepadSeekBy(deltaSecs: number) {
     if ($clipDuration <= 0) return;
     const next = Math.max(0, Math.min($clipDuration, $clipPosition + deltaSecs));
-    await seekClip(next);
+    await doSeek(next);
   }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="clip-player-root" bind:this={rootEl} onmousemove={onMouseMove}>
   <button
-    class="close-btn"
-    class:close-btn--visible={controlsVisible}
+    class="icon-btn fullscreen-btn"
+    class:icon-btn--visible={controlsVisible}
+    onclick={toggleFullscreen}
+    aria-label={$viewMode === "fullscreen" ? "Exit fullscreen" : "Enter fullscreen"}
+    title={$viewMode === "fullscreen" ? "Exit fullscreen" : "Enter fullscreen"}
+  >
+    {#if $viewMode === "fullscreen"}
+      <!-- collapse arrows -->
+      <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+        <polyline points="3,0 3,3 0,3" />
+        <polyline points="7,0 7,3 10,3" />
+        <polyline points="10,7 7,7 7,10" />
+        <polyline points="0,7 3,7 3,10" />
+      </svg>
+    {:else}
+      <!-- expand arrows -->
+      <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+        <polyline points="0,3 0,0 3,0" />
+        <polyline points="7,0 10,0 10,3" />
+        <polyline points="10,7 10,10 7,10" />
+        <polyline points="3,10 0,10 0,7" />
+      </svg>
+    {/if}
+  </button>
+
+  <button
+    class="icon-btn close-btn"
+    class:icon-btn--visible={controlsVisible}
     onclick={close}
     aria-label="Close"
   >
@@ -212,6 +345,19 @@
       height={box.h}
       style={canvasScale < 0.999 ? `transform: scale(${canvasScale})` : ""}
     ></canvas>
+
+    {#if !started}
+      <div class="load-placeholder">
+        {#if clip.thumbnail}
+          <img class="load-thumb" src={convertFileSrc(clip.thumbnail)} alt="" />
+        {/if}
+        <div class="spinner"></div>
+      </div>
+    {:else if seeking}
+      <div class="seek-overlay">
+        <div class="spinner"></div>
+      </div>
+    {/if}
   </div>
 
   <div class="title-bar" class:title-bar--visible={controlsVisible}>
@@ -272,13 +418,15 @@
     }
   }
 
-  .close-btn {
+  .icon-btn {
     position: absolute;
     top: 14px;
-    right: 14px;
     z-index: 1;
     width: 28px;
     height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 50%;
     border: 1px solid rgba(212, 219, 240, 0.15);
     background: linear-gradient(180deg, rgb(48, 48, 48), rgb(30, 30, 34));
@@ -291,22 +439,80 @@
     transition: opacity 0.22s ease;
   }
 
-  .close-btn--visible {
+  .icon-btn svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+  }
+
+  .icon-btn--visible {
     opacity: 1;
     pointer-events: auto;
   }
 
-  .close-btn:hover {
+  .icon-btn:hover {
     color: var(--text-primary);
   }
 
+  .close-btn {
+    right: 14px;
+  }
+
+  .fullscreen-btn {
+    right: 50px;
+  }
+
   .stage {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
     width: 100%;
     flex: 1;
     min-height: 0;
+  }
+
+  .load-placeholder,
+  .seek-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .load-placeholder {
+    background: #0a0a10;
+  }
+
+  .load-thumb {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: blur(10px) brightness(0.5);
+    transform: scale(1.05);
+  }
+
+  .seek-overlay {
+    background: rgba(10, 10, 16, 0.45);
+  }
+
+  .spinner {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    border-top-color: var(--track-active);
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   canvas {
