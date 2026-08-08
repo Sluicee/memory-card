@@ -851,7 +851,7 @@
       />
     </div>
 
-    {#if $selectedAlbum}
+    {#if $selectedAlbum && !$selectedClip}
       <AlbumView
         bind:this={albumView}
         album={$selectedAlbum}
@@ -862,7 +862,7 @@
       />
     {/if}
 
-    {#if selectedPlaylist}
+    {#if selectedPlaylist && !$selectedClip}
       <PlaylistView
         playlist={selectedPlaylist}
         onclose={() => (selectedPlaylist = null)}
@@ -901,7 +901,7 @@
       <EqualizerPanel bind:this={equalizerPanel} />
     {/if}
 
-    {#if $viewMode === "focus" || $viewMode === "fullscreen"}
+    {#if ($viewMode === "focus" || $viewMode === "fullscreen") && !$selectedClip}
       <FocusView />
     {/if}
   {/if}
