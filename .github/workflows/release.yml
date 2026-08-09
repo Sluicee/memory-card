@@ -78,7 +78,22 @@ jobs:
           tagName: v__VERSION__ # tauri-action automatically replaces this with the version from tauri.conf.json
           releaseName: "Memory Card v__VERSION__"
           releaseBody: "See the assets below for the installers."
-          releaseDraft: true
+          releaseDraft: true # kept as draft here so the release doesn't go public/trigger AUR publishing until every platform in the matrix has uploaded its assets — see finalize-release below
           prerelease: false
 
+  finalize-release:
+    name: Publish release
+    needs: publish # only runs once every matrix platform above has finished successfully, so all installers are already attached
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Un-draft the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          gh release edit "v$VERSION" --draft=false --repo "${{ github.repository }}"
 
