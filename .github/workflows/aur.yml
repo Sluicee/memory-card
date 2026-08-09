@@ -47,7 +47,7 @@ jobs:
 
           # Update .SRCINFO
           sed -i "s/pkgver = .*/pkgver = $VERSION/" .SRCINFO
-          sed -i "s/memory-card-bin-.*\.deb/memory-card-bin-$VERSION.deb/" .SRCINFO
+          sed -i "s/memory-card-bin-[^:]*\.deb/memory-card-bin-$VERSION.deb/" .SRCINFO
           sed -i "s|v.*/Memory.Card_.*_amd64.deb|v$VERSION/Memory.Card_${VERSION}_amd64.deb|" .SRCINFO
           sed -i "s/sha256sums = .*/sha256sums = $SHA256/" .SRCINFO
 
