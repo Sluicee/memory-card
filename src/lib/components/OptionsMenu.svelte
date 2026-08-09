@@ -157,7 +157,9 @@
 
   import { isEqualizerOpen } from '$lib/stores/equalizer';
 
-  const leftItems = $derived(
+  type MenuItem = { label: string; action: () => void; active?: boolean };
+
+  const leftItems: MenuItem[] = $derived(
     activeTab === 'clips'
       ? [
           { label: $t('addClipFolder'), action: addClipFolder },
@@ -175,25 +177,26 @@
 
   import { sortMode, cycleSortMode } from '$lib/stores/sortMode';
 
-  const rightItems = $derived([
-    { label: $t('sfx', $sfxEnabled),              action: toggleSfx       },
-    { label: $t('autostart', autostartEnabled),   action: toggleAutostart },
-    { label: $t('discordRpc', discordRpcEnabled), action: toggleDiscordRpc },
+  // Toggle items show only the key (no ": ON"/": OFF" suffix) and are
+  // highlighted via `active` when on, left unstyled when off — same idea
+  // as a lit vs. unlit button rather than a "key: value" caption.
+  const rightItems: MenuItem[] = $derived([
+    { label: $t('sfx'),        active: $sfxEnabled,       action: toggleSfx       },
+    { label: $t('autostart'),  active: autostartEnabled,  action: toggleAutostart },
+    { label: $t('discordRpc'), active: discordRpcEnabled, action: toggleDiscordRpc },
     {
-      label: $t(
-        'sortLabel',
+      label:
         $sortMode === 'artist'
           ? $t('sortByArtist')
           : $sortMode === 'title'
             ? $t('sortByTitle')
-            : $t('sortByYear')
-      ),
+            : $t('sortByYear'),
       action: () => {
         playUiSfx('confirm');
         cycleSortMode();
       },
     },
-    { label: $t('switchLanguage'),                action: () => { playUiSfx('confirm'); toggleLocale(); } },
+    { label: $t('switchLanguage'), action: () => { playUiSfx('confirm'); toggleLocale(); } },
   ]);
 
   // Gamepad cursor: -1 = none, 0 = updateItem, 1..L = left col, L+1..L+R = right col
@@ -250,7 +253,6 @@
   export function gamepadClearCursor() {
     gpIdx = -1;
   }
-
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -284,6 +286,7 @@
           {@const flatIdx = getUpdateOffset() + LEFT_COUNT + i}
           <button
             class="menu-item"
+            class:toggle-on={item.active}
             class:gp-focused={flatIdx === gpIdx}
             onclick={item.action}
           >{item.label}</button>
@@ -372,6 +375,13 @@
   .menu-item:hover,
   .menu-item.gp-focused {
     color: var(--track-active);
+  }
+
+  /* Toggle items (SFX, autostart, Discord RPC): the key itself lights up
+     when the setting is on, instead of appending a ": ON"/": OFF" value. */
+  .menu-item.toggle-on {
+    color: var(--track-active);
+    filter: drop-shadow(0 0 6px rgba(202, 167, 0, 0.55));
   }
 
   .menu-item.highlight {

@@ -161,15 +161,15 @@
       </div>
       <div class="stat-card">
         <span class="stat-val">{bassAvg}</span>
-        <span class="stat-lbl">BASS (LOW)</span>
+        <span class="stat-lbl">{$t('eqBass')}</span>
       </div>
       <div class="stat-card">
         <span class="stat-val">{midAvg}</span>
-        <span class="stat-lbl">MIDRANGE</span>
+        <span class="stat-lbl">{$t('eqMid')}</span>
       </div>
       <div class="stat-card">
         <span class="stat-val">{trebleAvg}</span>
-        <span class="stat-lbl">TREBLE (HIGH)</span>
+        <span class="stat-lbl">{$t('eqTreble')}</span>
       </div>
     </div>
 
@@ -235,7 +235,7 @@
               class="v-slider preamp-slider"
             />
           </div>
-          <span class="band-title">PREAMP</span>
+          <span class="band-title band-title--caps">{$t('preamp')}</span>
         </div>
 
         <div class="v-divider"></div>
@@ -522,6 +522,10 @@
     font-size: 9px;
     color: var(--text-dim);
     letter-spacing: 0.02em;
+  }
+
+  .band-title--caps {
+    text-transform: uppercase;
   }
 
   /* ── Footer ── */
