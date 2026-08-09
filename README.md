@@ -15,6 +15,10 @@ A desktop music player with a retro PS2/CRT aesthetic, built with Tauri 2, Svelt
 - Embedded cover art displayed as a 3D spinning disc (Three.js)
 - CRT scanlines, vignette, and PS2 color palette
 - Shuffle, volume control, seek
+- Playlists, play queue (with per-item removal and clear), and listening stats
+- Equalizer with per-band gain and preamp, applied via bundled FFmpeg audio filters
+- Clips: a music-video tab that scans a separate folder and plays videos in-window/fullscreen, streamed locally through the bundled FFmpeg sidecar (remuxed or transcoded to WebM as needed) — no system codec dependency
+- Gamepad navigation across grids, lists, and the clip/equalizer panels
 - Library cache persisted to disk — fast startup after first scan
 
 ## Installation
@@ -44,16 +48,17 @@ For detailed information on how to organize your music and how the library is sc
 | `↑` / `↓` | Volume Up / Down |
 | `S` / `R` | Shuffle / Repeat |
 | `F` or `/` | Search |
-| `1` / `2` | Switch Tabs (Library/Playlists) |
+| `1`–`5` | Switch Tabs (Library/Artists/Playlists/Queue/Clips) |
 
 
 ## Tech Stack
 
-| Layer    | Technology                                    |
-|----------|-----------------------------------------------|
-| Frontend | SvelteKit 5, TypeScript, Three.js, Vite       |
-| Backend  | Rust, Tauri 2, rodio, symphonia, lofty, tokio |
-| IPC      | Tauri `invoke` / `listen`                     |
+| Layer    | Technology                                             |
+|----------|---------------------------------------------------------|
+| Frontend | SvelteKit 5, TypeScript, Three.js, Vite                |
+| Backend  | Rust, Tauri 2, rodio, symphonia, lofty, tokio, tiny_http |
+| Media    | FFmpeg, bundled as a sidecar binary (equalizer filters, clip probing/remux/transcode) |
+| IPC      | Tauri `invoke` / `listen`, plus a local HTTP server for clip streaming |
 
 ## Requirements
 
@@ -91,6 +96,8 @@ Produces a platform-native installer in `src-tauri/target/release/bundle/`.
 - M4A/AAC files are decoded via symphonia entirely in memory to work around a rodio seek limitation.
 - Playback position and track-end detection use a 1-second polling loop on the frontend.
 - Settings and last-played track are stored in `localStorage`. The full library cache lives in Tauri's app data directory.
+- Equalizer gain/preamp is applied by piping audio through the bundled FFmpeg sidecar with an `equalizer`/`volume` filter chain, rather than in-process DSP.
+- Clips are served to a native `<video>` element by a local HTTP server (`127.0.0.1`, OS-assigned port): stream-copied (remuxed) when the source codec is already playable by the webview, otherwise live-transcoded to VP9/Opus WebM — both paths go through the same bundled FFmpeg sidecar.
 
 ## Known Issues
 
