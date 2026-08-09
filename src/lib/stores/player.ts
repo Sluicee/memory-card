@@ -318,17 +318,20 @@ function startPolling() {
       const pos = await invoke<number>('audio_get_position');
       position.set(pos);
 
-      // Check 25% threshold during active playback
+      // Check 25% threshold during active playback. Only the play count is
+      // credited here — totalListened is recorded exactly once, when the
+      // session ends (flushOutgoingTrackStats / handleTrackFinished).
+      // recordListened() *adds* its argument to a running total rather than
+      // replacing it, so calling it on every poll tick with the (growing)
+      // absolute position summed the position over and over — a 4-minute
+      // track counted roughly 60+61+...+240 ≈ 7.5 listened hours instead of 4 minutes.
       if (!_hasCountedPlay && _activeTrackId) {
         const dur = get(duration) || _activeTrackDuration || 0;
         const threshold = Math.max(10, dur * 0.25);
         if (pos >= threshold) {
           _hasCountedPlay = true;
           _currentHistoryId = recordPlay(_activeTrackId);
-          recordListened(_activeTrackId, pos, _currentHistoryId);
         }
-      } else if (_hasCountedPlay && _activeTrackId) {
-        recordListened(_activeTrackId, pos, _currentHistoryId);
       }
 
       if (await invoke<boolean>('audio_is_finished')) {

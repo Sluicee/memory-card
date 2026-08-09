@@ -89,3 +89,35 @@ export function clearStats(): void {
   localStorage.removeItem(HISTORY_KEY);
 }
 
+const REPAIR_FLAG_KEY = 'mp_stats_totalListened_repair_v1';
+
+/**
+ * One-time repair for a stats-inflation bug: the playback poller used to
+ * call recordListened() every second with the growing absolute position,
+ * and recordListened() ADDS its argument to totalListened rather than
+ * replacing it — so a single play summed roughly threshold+…+duration
+ * instead of counting duration once (a 4-minute track could inflate to
+ * hours). History entries were unaffected (Math.max, not addition above),
+ * so totalListened per track is rebuilt here from the still-accurate
+ * history log. No-ops after the first run.
+ */
+export function repairTotalListenedFromHistory(): void {
+  if (localStorage.getItem(REPAIR_FLAG_KEY)) return;
+
+  const history = loadHistory();
+  const totals: Record<string, number> = {};
+  for (const entry of history) {
+    totals[entry.trackId] = (totals[entry.trackId] ?? 0) + entry.listenedSeconds;
+  }
+
+  const s = loadStats();
+  for (const trackId of Object.keys(totals)) {
+    if (s[trackId]) {
+      s[trackId] = { ...s[trackId], totalListened: totals[trackId] };
+    }
+  }
+  saveStats(s);
+
+  localStorage.setItem(REPAIR_FLAG_KEY, '1');
+}
+

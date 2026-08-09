@@ -64,7 +64,7 @@
     loadLastTrack,
     stepVolume,
   } from "$lib/stores/player";
-  import { recordListened } from "$lib/stores/stats";
+  import { recordListened, repairTotalListenedFromHistory } from "$lib/stores/stats";
   import { sortMode } from "$lib/stores/sortMode";
   import { checkForUpdates } from "$lib/stores/updates";
   import { t } from "$lib/stores/i18n";
@@ -256,6 +256,7 @@
 
   onMount(async () => {
     primeUiSfx();
+    repairTotalListenedFromHistory();
 
     const discordRpcEnabled =
       localStorage.getItem("mc_discord_rpc_enabled") !== "false";

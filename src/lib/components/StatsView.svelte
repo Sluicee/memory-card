@@ -119,15 +119,18 @@
       .sort((a, b) => b.lastPlayed - a.lastPlayed)
       .slice(0, 10);
 
-    const totalPlays = Object.values(s).reduce(
-      (acc, t) => acc + t.playCount,
-      0,
-    );
-    const totalListened = Object.values(s).reduce(
-      (acc, t) => acc + t.totalListened,
-      0,
-    );
-    const uniqueTracks = Object.values(s).filter((t) => t.playCount > 0).length;
+    // Summed from trackMap (tracks still present in the current library),
+    // not the raw stats blob in localStorage — track.id is the file path,
+    // so renaming/moving/rescanning a file orphans its old stats entry
+    // forever. Summing the raw blob would let those dead entries inflate
+    // the summary cards indefinitely while never appearing in any tab below.
+    let totalPlays = 0;
+    let totalListened = 0;
+    for (const entry of trackMap.values()) {
+      totalPlays += entry.playCount;
+      totalListened += entry.totalListened;
+    }
+    const uniqueTracks = trackMap.size;
     const uniqueArtists = artistMap.size;
 
     return {
