@@ -2,6 +2,7 @@ import { playUiSfx } from "$lib/ui-sfx";
 import { viewMode } from "$lib/stores/viewMode";
 import { selectedAlbum } from "$lib/stores/library";
 import { selectedClip } from "$lib/stores/clips";
+import { isEqualizerOpen } from "$lib/stores/equalizer";
 import {
   currentTrack,
   currentAlbum,
@@ -102,9 +103,14 @@ export function handleGlobalKeydown(
       playUiSfx("steps");
       break;
     case "Escape":
+      let eqOpen = false;
+      isEqualizerOpen.subscribe((v) => (eqOpen = v))();
       let curViewMode = "normal";
       viewMode.subscribe((v) => (curViewMode = v))();
-      if (getSelectedClip) {
+      if (eqOpen) {
+        playUiSfx("back");
+        isEqualizerOpen.set(false);
+      } else if (getSelectedClip) {
         // ClipPlayerView sits above everything else (z-index 250) — closing
         // it takes priority over whatever else might technically be "open"
         // underneath. One step: exits fullscreen/focus (if active) and

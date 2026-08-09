@@ -62,9 +62,15 @@
       return;
     }
 
-    if (action === 'square') {
+    if (action === 'square' || action === 'r1') {
       playUiSfx('confirm');
       cycleNextPreset();
+      return;
+    }
+
+    if (action === 'l1') {
+      playUiSfx('confirm');
+      cyclePrevPreset();
       return;
     }
   }
@@ -74,6 +80,13 @@
     const idx = FACTORY_PRESETS.findIndex((p) => p.id === currentId);
     const nextIdx = (idx + 1) % FACTORY_PRESETS.length;
     applyPreset(FACTORY_PRESETS[nextIdx].id);
+  }
+
+  function cyclePrevPreset() {
+    const currentId = $equalizerStore.activePresetId;
+    const idx = FACTORY_PRESETS.findIndex((p) => p.id === currentId);
+    const prevIdx = (idx - 1 + FACTORY_PRESETS.length) % FACTORY_PRESETS.length;
+    applyPreset(FACTORY_PRESETS[prevIdx].id);
   }
 
   function handleOverlayMouseDown(e: MouseEvent) {

@@ -30,6 +30,15 @@ const HOLD_DELAY_MS  = 380;  // ms before first repeat fires
 const HOLD_REPEAT_MS = 160;  // ms between subsequent repeats
 const AXIS_THRESHOLD = 0.55; // deadzone for analog stick / axes
 
+// On at least one Linux/WebKitGTK setup, pulling L2 bleeds its trigger
+// value onto axes[1] — the same slot the Standard Gamepad mapping uses for
+// the left stick's Y axis — even though pad.mapping reports "standard".
+// The browser conflates the two before this code ever sees the data, so
+// they can't be told apart by origin; requiring the threshold-crossing to
+// hold for a beat filters the short antagonistic spike L2 produces without
+// noticeably slowing down a deliberate stick push.
+const STICK_STABLE_MS = 50;
+
 type Listener = (action: GamepadAction) => void;
 const listeners = new Set<Listener>();
 
@@ -52,6 +61,68 @@ const lastRepeat = new Map<GamepadAction, number>();
 
 function fire(action: GamepadAction) {
   for (const fn of listeners) fn(action);
+}
+
+// Chromium hands back GamepadButton objects ({ pressed, value }), but
+// WebKitGTK on Linux has been observed handing back raw floats (0.0/1.0)
+// for individual button slots instead — this normalizes both shapes.
+function isButtonPressed(btnObj: GamepadButton | number | undefined): boolean {
+  if (btnObj === undefined) return false;
+  return typeof btnObj === 'object' ? btnObj.pressed : btnObj === 1.0;
+}
+
+// DEV-only: prints the raw pad snapshot whenever it changes, so a real
+// mapping (e.g. the D-pad hat's actual axis indices) can be read off
+// devtools instead of guessed at. Open devtools in `npx tauri dev`, press
+// the D-pad / L2 / R2, and check the console.
+let lastDebugSnapshot = '';
+function debugDumpPadState(pad: Gamepad) {
+  const buttons = pad.buttons.map((b, i) => {
+    const val = typeof b === 'object' ? b.value : b;
+    return Number(val) > 0.05 ? `${i}:${Number(val).toFixed(2)}` : null;
+  }).filter(Boolean);
+  const axes = pad.axes.map((a, i) => (Math.abs(a) > 0.05 ? `${i}:${a.toFixed(2)}` : null)).filter(Boolean);
+  const snapshot = JSON.stringify({ buttons, axes });
+  if (snapshot !== lastDebugSnapshot) {
+    lastDebugSnapshot = snapshot;
+    // eslint-disable-next-line no-console
+    console.debug('[gamepad]', pad.id, 'mapping=' + JSON.stringify(pad.mapping), 'buttons=', buttons, 'axes=', axes);
+  }
+}
+
+interface AxisDebounceState {
+  rawDir: -1 | 0 | 1;
+  rawSince: number;
+  confirmedDir: -1 | 0 | 1;
+}
+
+function debounceAxis(state: AxisDebounceState, value: number, now: DOMHighResTimeStamp): -1 | 0 | 1 {
+  const rawDir: -1 | 0 | 1 = value < -AXIS_THRESHOLD ? -1 : value > AXIS_THRESHOLD ? 1 : 0;
+
+  if (rawDir !== state.rawDir) {
+    state.rawDir = rawDir;
+    state.rawSince = now;
+  }
+
+  if (rawDir === 0) {
+    // Returning to center is trusted immediately — only asserting a
+    // direction needs the settle time, not releasing one.
+    state.confirmedDir = 0;
+  } else if (rawDir !== state.confirmedDir && now - state.rawSince >= STICK_STABLE_MS) {
+    state.confirmedDir = rawDir;
+  }
+
+  return state.confirmedDir;
+}
+
+const stickYDebounce: AxisDebounceState = { rawDir: 0, rawSince: 0, confirmedDir: 0 };
+const stickXDebounce: AxisDebounceState = { rawDir: 0, rawSince: 0, confirmedDir: 0 };
+
+function resetAxisDebounce() {
+  stickYDebounce.rawDir = stickYDebounce.confirmedDir = 0;
+  stickYDebounce.rawSince = 0;
+  stickXDebounce.rawDir = stickXDebounce.confirmedDir = 0;
+  stickXDebounce.rawSince = 0;
 }
 
 function processActionState(action: GamepadAction, pressed: boolean, now: DOMHighResTimeStamp) {
@@ -91,6 +162,7 @@ function pollFrame() {
     prevPressed = {};
     holdStart.clear();
     lastRepeat.clear();
+    resetAxisDebounce();
     return;
   }
 
@@ -104,32 +176,41 @@ function pollFrame() {
     for (let i = 0; i <= 11; i++) {
       const action = BUTTON_MAP[i];
       if (!action) continue;
-      const btnObj = pad.buttons[i];
-      const pressed = typeof btnObj === 'object' ? btnObj.pressed : btnObj === 1.0;
-      processActionState(action, Boolean(pressed), now);
+      processActionState(action, isButtonPressed(pad.buttons[i]), now);
     }
 
-    // 2. Compute combined direction states (D-pad buttons + Analog Sticks + Linux Axes)
-    const btnUp    = Boolean(pad.buttons[12]?.pressed);
-    const btnDown  = Boolean(pad.buttons[13]?.pressed);
-    const btnLeft  = Boolean(pad.buttons[14]?.pressed);
-    const btnRight = Boolean(pad.buttons[15]?.pressed);
+    // 2. Compute combined direction states (D-pad buttons + Analog Stick)
+    //
+    // A previous version also OR'd in axes[4..7] as a guessed "Linux hat"
+    // fallback for the D-pad. That guess turned out to collide with L2/R2 —
+    // on at least one Linux/WebKitGTK controller, the analog trigger axes
+    // land at those same indices, so pulling L2 was read as "d-pad down".
+    // Removed until we have verified axis indices for a real hat (see the
+    // DEV-only diagnostic dump below) — the analog stick remains a working
+    // substitute for directional input in the meantime.
+    const btnUp    = isButtonPressed(pad.buttons[12]);
+    const btnDown  = isButtonPressed(pad.buttons[13]);
+    const btnLeft  = isButtonPressed(pad.buttons[14]);
+    const btnRight = isButtonPressed(pad.buttons[15]);
 
     const axes = pad.axes || [];
     const stickX = axes[0] ?? 0;
     const stickY = axes[1] ?? 0;
-    const dpadX  = axes[4] ?? axes[6] ?? 0;
-    const dpadY  = axes[5] ?? axes[7] ?? 0;
 
-    const isUp    = btnUp   || stickY < -AXIS_THRESHOLD || dpadY < -AXIS_THRESHOLD;
-    const isDown  = btnDown || stickY > AXIS_THRESHOLD  || dpadY > AXIS_THRESHOLD;
-    const isLeft  = btnLeft || stickX < -AXIS_THRESHOLD || dpadX < -AXIS_THRESHOLD;
-    const isRight = btnRight|| stickX > AXIS_THRESHOLD  || dpadX > AXIS_THRESHOLD;
+    const stickYDir = debounceAxis(stickYDebounce, stickY, now);
+    const stickXDir = debounceAxis(stickXDebounce, stickX, now);
+
+    const isUp    = btnUp   || stickYDir < 0;
+    const isDown  = btnDown || stickYDir > 0;
+    const isLeft  = btnLeft || stickXDir < 0;
+    const isRight = btnRight|| stickXDir > 0;
 
     processActionState('up', isUp, now);
     processActionState('down', isDown, now);
     processActionState('left', isLeft, now);
     processActionState('right', isRight, now);
+
+    if (import.meta.env.DEV) debugDumpPadState(pad);
 
   } else {
     _connected.set(false);
@@ -148,6 +229,7 @@ export function stopPolling() {
   prevPressed = {};
   holdStart.clear();
   lastRepeat.clear();
+  resetAxisDebounce();
 }
 
 export function addGamepadListener(fn: Listener): () => void {

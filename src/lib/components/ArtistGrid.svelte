@@ -25,6 +25,9 @@
   let prevLength = 0;
   let initialPageSet = false;
 
+  // Gamepad cursor: index within current page (-1 = inactive)
+  let gpCursor = $state(-1);
+
   let totalPages = $derived(Math.max(1, Math.ceil(artists.length / PER_PAGE)));
 
   function pageArtists(pageIdx: number): Artist[] {
@@ -92,6 +95,80 @@
     if (e.deltaY > 0) nextPage();
     else prevPage();
   }
+
+  // ── Gamepad API ──────────────────────────────────────────────────
+
+  // Returns true if navigation hit a boundary and couldn't move
+  export function gamepadNavigate(
+    dir: "left" | "right" | "up" | "down",
+  ): boolean {
+    let pageItems = pageArtists(currentPage);
+    if (pageItems.length === 0) return false;
+
+    if (gpCursor < 0) {
+      gpCursor = dir === "left" || dir === "up" ? pageItems.length - 1 : 0;
+      onhover(pageItems[gpCursor]);
+      return false;
+    }
+
+    const col = gpCursor % COLS;
+    const row = Math.floor(gpCursor / COLS);
+
+    switch (dir) {
+      case "right": {
+        if (col < COLS - 1 && gpCursor + 1 < pageItems.length) {
+          gpCursor = gpCursor + 1;
+        } else {
+          nextPage();
+          pageItems = pageArtists(currentPage);
+          gpCursor = Math.min(row * COLS, pageItems.length - 1);
+        }
+        break;
+      }
+      case "left": {
+        if (col > 0) {
+          gpCursor = gpCursor - 1;
+        } else {
+          prevPage();
+          pageItems = pageArtists(currentPage);
+          const target = row * COLS + (COLS - 1);
+          gpCursor = Math.min(target, pageItems.length - 1);
+        }
+        break;
+      }
+      case "down": {
+        const next = (row + 1) * COLS + col;
+        if (next < pageItems.length) {
+          gpCursor = next;
+        } else {
+          return true;
+        }
+        break;
+      }
+      case "up": {
+        if (row > 0) {
+          gpCursor = (row - 1) * COLS + col;
+        } else {
+          return true;
+        }
+        break;
+      }
+    }
+
+    const hovered = pageArtists(currentPage)[gpCursor];
+    if (hovered) onhover(hovered);
+    return false;
+  }
+
+  export function gamepadConfirm() {
+    if (gpCursor < 0) return;
+    const artist = pageArtists(currentPage)[gpCursor];
+    if (artist) onselect(artist);
+  }
+
+  export function gamepadClearCursor() {
+    gpCursor = -1;
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -106,7 +183,11 @@
       <div class="page">
         <div class="grid">
           {#each pageArtists(totalPages - 1) as artist (artist.name + '_lc')}
-            <ArtistCard {artist} onclick={() => onselect(artist)} onhover={(a) => onhover(a)} />
+            <ArtistCard
+              {artist}
+              onclick={() => onselect(artist)}
+              onhover={(a) => { gpCursor = -1; onhover(a); }}
+            />
           {/each}
         </div>
       </div>
@@ -115,11 +196,12 @@
       {#each Array(totalPages) as _, pageIdx}
         <div class="page">
           <div class="grid">
-            {#each pageArtists(pageIdx) as artist (artist.name)}
+            {#each pageArtists(pageIdx) as artist, i (artist.name)}
               <ArtistCard
                 {artist}
+                focused={pageIdx === currentPage && i === gpCursor}
                 onclick={() => onselect(artist)}
-                onhover={(a) => onhover(a)}
+                onhover={(a) => { gpCursor = -1; onhover(a); }}
               />
             {/each}
           </div>
@@ -130,7 +212,11 @@
       <div class="page">
         <div class="grid">
           {#each pageArtists(0) as artist (artist.name + '_fc')}
-            <ArtistCard {artist} onclick={() => onselect(artist)} onhover={(a) => onhover(a)} />
+            <ArtistCard
+              {artist}
+              onclick={() => onselect(artist)}
+              onhover={(a) => { gpCursor = -1; onhover(a); }}
+            />
           {/each}
         </div>
       </div>

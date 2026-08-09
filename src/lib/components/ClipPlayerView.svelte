@@ -313,6 +313,16 @@
     const next = Math.max(0, Math.min(clipDurationVal, absolutePosition + deltaSecs));
     await doSeek(next);
   }
+
+  export function gamepadToggleFullscreen() {
+    toggleFullscreen();
+  }
+
+  // Stick/d-pad movement reveals the auto-hidden controls, same as a mouse
+  // nudge would — there's no cursor to move in a gamepad-only session.
+  export function gamepadRevealControls() {
+    onMouseMove();
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->

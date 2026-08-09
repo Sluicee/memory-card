@@ -8,6 +8,33 @@
 
   let { albums, onclose }: { albums: Album[]; onclose: () => void } = $props();
 
+  const TABS: Tab[] = ["artists", "albums", "tracks", "recent"];
+  let listEl = $state<HTMLDivElement | null>(null);
+
+  export function handleGamepadInput(action: string) {
+    if (action === "circle" || action === "select") {
+      handleClose();
+      return;
+    }
+
+    if (action === "left" || action === "right" || action === "l1" || action === "r1") {
+      const idx = TABS.indexOf(activeTab);
+      const dir = action === "left" || action === "l1" ? -1 : 1;
+      setActiveTab(TABS[(idx + dir + TABS.length) % TABS.length]);
+      return;
+    }
+
+    if (action === "up" || action === "down") {
+      listEl?.scrollBy({ top: action === "up" ? -48 : 48, behavior: "auto" });
+      return;
+    }
+
+    if (action === "triangle") {
+      handleClear();
+      return;
+    }
+  }
+
   // ── Derived stats ─────────────────────────────────────────────────────────────
 
   interface TrackEntry {
@@ -225,7 +252,7 @@
     </div>
 
     <!-- Content -->
-    <div class="list">
+    <div class="list" bind:this={listEl}>
       {#if activeTab === "artists"}
         {#if stats.artistsTop.length === 0}
           <p class="empty">{$t('noPlaysYet')}</p>
@@ -353,7 +380,8 @@
         <span>{$t('back')}</span>
       </button>
       <button class="clear-btn" class:confirming onclick={handleClear}>
-        {confirming ? $t('areYouSure') : $t('clearStats')}
+        <PS2Btn type="triangle" />
+        <span>{confirming ? $t('areYouSure') : $t('clearStats')}</span>
       </button>
     </div>
   </div>
@@ -601,6 +629,9 @@
   }
 
   .clear-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     background: none;
     border: 1px solid rgba(90, 95, 120, 0.3);
     border-radius: 4px;

@@ -17,10 +17,55 @@
   let newName = $state('');
   let addedToId = $state<string | null>(null);
   let nameInput = $state<HTMLInputElement | null>(null);
+  let focusedIdx = $state(0);
 
   $effect(() => {
     if (creatingNew) setTimeout(() => nameInput?.focus(), 10);
   });
+
+  // Items = playlist rows + the trailing "new playlist" row
+  let itemCount = $derived($playlists.length + 1);
+
+  export function handleGamepadInput(action: string) {
+    if (creatingNew) {
+      if (action === 'circle' || action === 'select') {
+        creatingNew = false;
+        newName = '';
+      } else if (action === 'cross') {
+        handleCreateNew();
+      }
+      return;
+    }
+
+    if (action === 'circle' || action === 'select') {
+      handleClose();
+      return;
+    }
+
+    if (action === 'up') {
+      playUiSfx('steps');
+      focusedIdx = (focusedIdx - 1 + itemCount) % itemCount;
+      return;
+    }
+
+    if (action === 'down') {
+      playUiSfx('steps');
+      focusedIdx = (focusedIdx + 1) % itemCount;
+      return;
+    }
+
+    if (action === 'cross') {
+      if (focusedIdx === $playlists.length) {
+        playUiSfx('confirm');
+        creatingNew = true;
+        return;
+      }
+      const pl = $playlists[focusedIdx];
+      if (!pl) return;
+      const alreadyIn = pl.tracks.some((t) => t.id === track.id);
+      if (!alreadyIn && addedToId === null) handleAddTo(pl.id);
+    }
+  }
 
   function handleAddTo(playlistId: string) {
     addToPlaylist(playlistId, track);
@@ -76,12 +121,13 @@
         maxlength="40"
       />
     {:else}
-      {#each $playlists as pl (pl.id)}
+      {#each $playlists as pl, i (pl.id)}
         {@const alreadyIn = pl.tracks.some((t) => t.id === track.id)}
         <button
           class="menu-item"
           class:added={addedToId === pl.id}
           class:already={alreadyIn && addedToId === null}
+          class:focused={focusedIdx === i}
           onclick={() => !alreadyIn && !addedToId && handleAddTo(pl.id)}
         >
           {#if addedToId === pl.id}
@@ -93,7 +139,11 @@
           {/if}
         </button>
       {/each}
-      <button class="menu-item menu-item--new" onclick={() => (creatingNew = true)}>
+      <button
+        class="menu-item menu-item--new"
+        class:focused={focusedIdx === $playlists.length}
+        onclick={() => (creatingNew = true)}
+      >
         {$t('newPlaylist')}
       </button>
     {/if}
@@ -198,6 +248,11 @@
   }
 
   .menu-item:hover:not(:disabled) { color: var(--track-active); }
+
+  .menu-item.focused {
+    color: var(--track-active);
+    text-shadow: 0 0 8px var(--track-active);
+  }
 
   .menu-item.added { color: var(--track-active); }
 

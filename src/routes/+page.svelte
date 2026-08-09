@@ -6,8 +6,10 @@
   import AlbumView from "$lib/components/AlbumView.svelte";
   import type AlbumViewType from "$lib/components/AlbumView.svelte";
   import PlaylistGrid from "$lib/components/PlaylistGrid.svelte";
+  import type PlaylistGridType from "$lib/components/PlaylistGrid.svelte";
   import PlaylistView from "$lib/components/PlaylistView.svelte";
   import ArtistGrid from "$lib/components/ArtistGrid.svelte";
+  import type ArtistGridType from "$lib/components/ArtistGrid.svelte";
   import ClipGrid from "$lib/components/ClipGrid.svelte";
   import type ClipGridType from "$lib/components/ClipGrid.svelte";
   import ClipPlayerView from "$lib/components/ClipPlayerView.svelte";
@@ -15,7 +17,9 @@
   import OptionsMenu from "$lib/components/OptionsMenu.svelte";
   import type OptionsMenuType from "$lib/components/OptionsMenu.svelte";
   import StatsView from "$lib/components/StatsView.svelte";
+  import type StatsViewType from "$lib/components/StatsView.svelte";
   import PlaylistPicker from "$lib/components/PlaylistPicker.svelte";
+  import type PlaylistPickerType from "$lib/components/PlaylistPicker.svelte";
   import ViewModeBar from "$lib/components/ViewModeBar.svelte";
   import FocusView from "$lib/components/FocusView.svelte";
   import MiniPlayer from "$lib/components/MiniPlayer.svelte";
@@ -113,6 +117,8 @@
   // Component refs for gamepad cursor control
   let albumGrid = $state<AlbumGridType | null>(null);
   let clipGrid = $state<ClipGridType | null>(null);
+  let artistGrid = $state<ArtistGridType | null>(null);
+  let playlistGrid = $state<PlaylistGridType | null>(null);
   let clipPlayerView = $state<ClipPlayerViewType | null>(null);
   let albumView = $state<AlbumViewType | null>(null);
   let optionsMenu = $state<OptionsMenuType | null>(null);
@@ -284,6 +290,8 @@
   });
 
   let equalizerPanel = $state<EqualizerPanelType | null>(null);
+  let statsView = $state<StatsViewType | null>(null);
+  let playlistPicker = $state<PlaylistPickerType | null>(null);
 
   function handleGamepadAction(action: GamepadAction) {
     if (!document.hasFocus()) return;
@@ -299,7 +307,14 @@
       handleGamepadOptions(action);
       return;
     }
-    if (statsOpen || npPickerOpen) return;
+    if (statsOpen) {
+      statsView?.handleGamepadInput(action);
+      return;
+    }
+    if (npPickerOpen) {
+      playlistPicker?.handleGamepadInput(action);
+      return;
+    }
 
     if ($selectedClip) {
       handleGamepadClipPlayer(action);
@@ -336,6 +351,15 @@
       case "r2":
         playUiSfx("steps");
         stepVolume(1);
+        break;
+      case "select":
+        clipPlayerView?.gamepadToggleFullscreen();
+        break;
+      case "up":
+      case "down":
+      case "left":
+      case "right":
+        clipPlayerView?.gamepadRevealControls();
         break;
     }
   }
@@ -395,6 +419,8 @@
     switch (action) {
       case "cross":
         if (activeTab === "clips") clipGrid?.gamepadConfirm();
+        else if (activeTab === "artists") artistGrid?.gamepadConfirm();
+        else if (activeTab === "playlists") playlistGrid?.gamepadConfirm();
         else albumGrid?.gamepadConfirm();
         break;
       case "circle":
@@ -424,26 +450,25 @@
       case "start":
         if ($currentTrack) handleTransportPlayPause();
         break;
-      case "select":
-        activeTab =
-          activeTab === "library"
-            ? "artists"
-            : activeTab === "artists"
-              ? "playlists"
-              : activeTab === "playlists"
-                ? "clips"
-                : "library";
+      case "select": {
+        const tabOrder = ["library", "artists", "playlists", "clips", "queue"] as const;
+        activeTab = tabOrder[(tabOrder.indexOf(activeTab) + 1) % tabOrder.length];
         playUiSfx("confirm");
         albumGrid?.gamepadClearCursor();
         clipGrid?.gamepadClearCursor();
+        artistGrid?.gamepadClearCursor();
+        playlistGrid?.gamepadClearCursor();
         gpNowPlayingFocused = false;
         break;
+      }
       case "l3":
         openOptions();
         break;
       case "up":
         if (activeTab === "library") albumGrid?.gamepadNavigate("up");
         else if (activeTab === "clips") clipGrid?.gamepadNavigate("up");
+        else if (activeTab === "artists") artistGrid?.gamepadNavigate("up");
+        else if (activeTab === "playlists") playlistGrid?.gamepadNavigate("up");
         break;
       case "down":
         if (activeTab === "library") {
@@ -454,15 +479,23 @@
           }
         } else if (activeTab === "clips") {
           clipGrid?.gamepadNavigate("down");
+        } else if (activeTab === "artists") {
+          artistGrid?.gamepadNavigate("down");
+        } else if (activeTab === "playlists") {
+          playlistGrid?.gamepadNavigate("down");
         }
         break;
       case "left":
         if (activeTab === "library") albumGrid?.gamepadNavigate("left");
         else if (activeTab === "clips") clipGrid?.gamepadNavigate("left");
+        else if (activeTab === "artists") artistGrid?.gamepadNavigate("left");
+        else if (activeTab === "playlists") playlistGrid?.gamepadNavigate("left");
         break;
       case "right":
         if (activeTab === "library") albumGrid?.gamepadNavigate("right");
         else if (activeTab === "clips") clipGrid?.gamepadNavigate("right");
+        else if (activeTab === "artists") artistGrid?.gamepadNavigate("right");
+        else if (activeTab === "playlists") playlistGrid?.gamepadNavigate("right");
         break;
     }
   }
@@ -739,6 +772,7 @@
             </div>
           {:else}
             <ArtistGrid
+              bind:this={artistGrid}
               artists={groupedArtists}
               onselect={(artist) => {
                 playUiSfx("confirm");
@@ -759,6 +793,7 @@
             </div>
           {:else}
             <PlaylistGrid
+              bind:this={playlistGrid}
               playlists={filteredPlaylists}
               onselect={(pl) => {
                 playUiSfx("confirm");
@@ -879,6 +914,7 @@
 
     {#if npPickerOpen && $currentTrack}
       <PlaylistPicker
+        bind:this={playlistPicker}
         track={$currentTrack}
         onclose={() => (npPickerOpen = false)}
       />
@@ -894,7 +930,7 @@
     {/if}
 
     {#if statsOpen}
-      <StatsView albums={$albums} onclose={() => (statsOpen = false)} />
+      <StatsView bind:this={statsView} albums={$albums} onclose={() => (statsOpen = false)} />
     {/if}
 
     {#if $isEqualizerOpen}

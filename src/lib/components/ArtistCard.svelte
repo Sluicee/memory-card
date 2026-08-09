@@ -6,10 +6,12 @@
     artist,
     onclick,
     onhover,
+    focused = false,
   }: {
     artist: Artist;
     onclick: () => void;
     onhover: (artist: Artist | null) => void;
+    focused?: boolean;
   } = $props();
 
   const coverSrc = $derived((() => {
@@ -22,6 +24,7 @@
 
 <button
   class="card"
+  class:gp-focused={focused}
   {onclick}
   onmouseenter={() => onhover(artist)}
   onmouseleave={() => onhover(null)}
@@ -104,9 +107,17 @@
   }
 
   .card:hover .art::before,
-  .card:focus-visible .art::before {
+  .card:focus-visible .art::before,
+  .card.gp-focused .art::before {
     transform: translateX(115%);
     opacity: 1;
+  }
+
+  .card.gp-focused .art {
+    box-shadow:
+      0 0 0 2px rgba(100, 140, 255, 0.85),
+      3px 5px 14px rgba(0, 0, 0, 0.32);
+    filter: brightness(1.1) saturate(1.08);
   }
 
   .art img {
