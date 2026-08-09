@@ -95,7 +95,7 @@ pub fn parse_probe_stderr(stderr: &str) -> ProbeInfo {
 fn parse_codec_name(line: &str, marker: &str) -> Option<String> {
     let idx = line.find(marker)?;
     let rest = &line[idx + marker.len()..];
-    let token = rest.split(|c: char| c == ',' || c == ' ' || c == '(').next()?.trim();
+    let token = rest.split([',', ' ', '(']).next()?.trim();
     if token.is_empty() { None } else { Some(token.to_string()) }
 }
 

@@ -2,7 +2,7 @@ use crate::discord_rpc::DiscordManager;
 use souvlaki::{MediaControls, MediaPlayback, MediaPosition, PlatformConfig};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, WPARAM};
 #[cfg(target_os = "windows")]
@@ -60,6 +60,7 @@ struct TrackMetadata {
 
 pub struct MediaControlsManager {
     controls: Arc<Mutex<Option<MediaControls>>>,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     hwnd: isize,
     discord: DiscordManager,
     discord_enabled: Arc<AtomicBool>,

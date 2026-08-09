@@ -132,7 +132,7 @@ pub fn scan_clip_folder(folder_path: &str, app: &tauri::AppHandle, thumbs_dir: &
             // Emitted more often than the audio scanner's every-200 — a per-file
             // ffmpeg spawn is much heavier than an in-process tag read, so scans
             // are smaller/slower and users benefit from finer-grained feedback.
-            if n % 10 == 0 || n == total {
+            if n.is_multiple_of(10) || n == total {
                 app_ref.emit("clip:scan:progress", ClipScanProgress { files_scanned: n }).ok();
             }
             result

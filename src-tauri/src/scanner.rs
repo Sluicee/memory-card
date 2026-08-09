@@ -64,8 +64,6 @@ pub fn cover_filename(album_id: &str, mime: &str) -> String {
 struct TrackResult {
     track: Track,
     explicit_album_artist: Option<String>,
-    /// Raw cover bytes + MIME type from embedded tags, if present.
-    cover: Option<(Vec<u8>, String)>,
 }
 
 fn get_tag_year(tag: &lofty::tag::Tag) -> Option<u32> {
@@ -219,7 +217,6 @@ fn read_track_and_cover(path: &Path) -> Option<TrackResult> {
             search_index,
         },
         explicit_album_artist,
-        cover: None,
     })
 }
 
@@ -348,12 +345,11 @@ fn strip_disc_suffix(album: &str) -> &str {
     for keyword in ["disc ", "cd "] {
         if let Some(idx_byte_idx) = lower.rfind(keyword) {
             let after = &lower[idx_byte_idx + keyword.len()..];
-            if !after.is_empty() && after.trim_start_matches(|c: char| c.is_ascii_digit()).is_empty() {
-                if idx_byte_idx == 0 || lower.as_bytes()[idx_byte_idx - 1] == b' ' {
-                    let char_idx = lower[..idx_byte_idx].chars().count();
-                    let end_byte_idx = trimmed.char_indices().nth(char_idx).map(|(idx, _)| idx).unwrap_or(trimmed.len());
-                    return trimmed[..end_byte_idx].trim_end();
-                }
+            if !after.is_empty() && after.trim_start_matches(|c: char| c.is_ascii_digit()).is_empty()
+                && (idx_byte_idx == 0 || lower.as_bytes()[idx_byte_idx - 1] == b' ') {
+                let char_idx = lower[..idx_byte_idx].chars().count();
+                let end_byte_idx = trimmed.char_indices().nth(char_idx).map(|(idx, _)| idx).unwrap_or(trimmed.len());
+                return trimmed[..end_byte_idx].trim_end();
             }
         }
     }
@@ -415,7 +411,7 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
         .filter_map(|path| {
             let result = read_track_and_cover(path)?;
             let n = cnt.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 200 == 0 || n == total {
+            if n.is_multiple_of(200) || n == total {
                 app_ref.emit("scan:progress", ScanProgress { files_scanned: n, albums_found: 0 }).ok();
             }
             Some((result, path.clone()))
@@ -426,7 +422,7 @@ pub fn scan_folder(folder_path: &str, app: &tauri::AppHandle, covers_dir: &Path)
     let mut albums: HashMap<String, Album> = HashMap::new();
 
     for (result, audio_path) in results {
-        let TrackResult { track, explicit_album_artist, cover: _ } = result;
+        let TrackResult { track, explicit_album_artist } = result;
         
         let album_name_norm = strip_disc_suffix(track.album.trim()).to_lowercase();
         let album_key = if album_name_norm.is_empty() || album_name_norm == "unknown album" {

@@ -314,8 +314,7 @@ impl AudioPlayer {
                             st.equalizer = new_eq.clone();
                         }
 
-                        if (was_playing || was_paused) && path.is_some() {
-                            let path = path.unwrap();
+                        if let Some(path) = path.filter(|_| was_playing || was_paused) {
                             let start = Instant::now();
                             match build_sink(&app_handle, &handle, &path, volume, current_pos, &new_eq) {
                                 Ok(new_sink) => {
