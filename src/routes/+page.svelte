@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import AlbumGrid from "$lib/components/AlbumGrid.svelte";
@@ -29,7 +30,7 @@
   import FooterTransport from "$lib/components/FooterTransport.svelte";
   import EqualizerPanel from "$lib/components/EqualizerPanel.svelte";
   import type EqualizerPanelType from "$lib/components/EqualizerPanel.svelte";
-  import { isEqualizerOpen } from "$lib/stores/equalizer";
+  import { isEqualizerOpen, equalizerStore, syncBackend } from "$lib/stores/equalizer";
 
   import { viewMode } from "$lib/stores/viewMode";
   import { playUiSfx, primeUiSfx } from "$lib/ui-sfx";
@@ -257,6 +258,10 @@
   onMount(async () => {
     primeUiSfx();
     repairTotalListenedFromHistory();
+    // Backend equalizer state starts flat/disabled on process launch; push the
+    // persisted settings once so playback picks them up before the user
+    // touches a control (otherwise tracks play flat until first adjustment).
+    syncBackend(get(equalizerStore), true);
 
     const discordRpcEnabled =
       localStorage.getItem("mc_discord_rpc_enabled") !== "false";

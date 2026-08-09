@@ -70,5 +70,9 @@ jobs:
         working-directory: src-tauri
         run: cargo check
 
+      - name: run Rust unit tests
+        working-directory: src-tauri
+        run: cargo test
+
       - name: test frontend build
         run: npm run build

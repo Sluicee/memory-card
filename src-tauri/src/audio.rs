@@ -315,17 +315,14 @@ impl AudioPlayer {
                         }
 
                         if let Some(path) = path.filter(|_| was_playing || was_paused) {
+                            gently_stop(sink.take()); // Fade out old sink before the new one starts, avoiding overlap
                             let start = Instant::now();
                             match build_sink(&app_handle, &handle, &path, volume, current_pos, &new_eq) {
                                 Ok(new_sink) => {
                                     if was_paused {
                                         new_sink.pause();
                                     }
-                                    let old_sink = sink.take();
                                     sink = Some(new_sink);
-                                    if let Some(s) = old_sink {
-                                        s.stop();
-                                    }
                                     let mut st = state_thread.lock().unwrap();
                                     st.is_playing = !was_paused;
                                     st.is_paused = was_paused;

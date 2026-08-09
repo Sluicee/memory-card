@@ -37,10 +37,10 @@
     if (action === 'up') {
       playUiSfx('steps');
       if (focusedIdx === 0) {
-        setPreampGain($equalizerStore.preamp + 1.0, true);
+        setPreampGain($equalizerStore.preamp + 1.0, false);
       } else {
         const band = focusedIdx - 1;
-        setBandGain(band, $equalizerStore.gains[band] + 1.0, true);
+        setBandGain(band, $equalizerStore.gains[band] + 1.0, false);
       }
       return;
     }
@@ -48,10 +48,10 @@
     if (action === 'down') {
       playUiSfx('steps');
       if (focusedIdx === 0) {
-        setPreampGain($equalizerStore.preamp - 1.0, true);
+        setPreampGain($equalizerStore.preamp - 1.0, false);
       } else {
         const band = focusedIdx - 1;
-        setBandGain(band, $equalizerStore.gains[band] - 1.0, true);
+        setBandGain(band, $equalizerStore.gains[band] - 1.0, false);
       }
       return;
     }
