@@ -2,6 +2,11 @@ name: "windows-test-build"
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - dev
+    paths:
+      - ".github/workflows/windows-test-build.yml"
 
 jobs:
   build:
