@@ -35,6 +35,14 @@ yay -S memory-card-bin
 
 Download the pre-compiled packages (`.exe` or `.deb`) from the **[GitHub Releases](https://github.com/Sluicee/memory-card/releases)** page.
 
+### Updating
+
+When a newer release exists, an update entry appears at the top of the options menu. On Windows,
+macOS and Linux (AppImage, `.deb`, `.rpm`) it downloads and installs the update in place, with a
+progress bar, and restarts the app — the `.deb`/`.rpm` path asks for your password, since it hands
+the package to `dpkg`/`rpm`. AUR installs are left to `pacman`, and the entry opens the release
+page instead.
+
 ## Documentation & Controls
 
 For detailed information on how to organize your music and how the library is scanned, see the **[User Manual](docs/MANUAL.md)** ([RU](docs/MANUAL_RU.md)).

@@ -74,12 +74,22 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts (.sig files next to each installer).
+          # Without these the build fails, because tauri.conf.json enables
+          # createUpdaterArtifacts.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__ # tauri-action automatically replaces this with the version from tauri.conf.json
           releaseName: "Memory Card v__VERSION__"
           releaseBody: "See the assets below for the installers."
           releaseDraft: true # kept as draft here so the release doesn't go public/trigger AUR publishing until every platform in the matrix has uploaded its assets — see finalize-release below
           prerelease: false
+          # Each matrix job would otherwise upload its own latest.json and race
+          # the other two for the same asset, so a platform can silently go
+          # missing from the manifest. finalize-release builds it once instead,
+          # from the .sig files all three jobs have finished uploading.
+          includeUpdaterJson: false
 
   finalize-release:
     name: Publish release
@@ -89,6 +99,89 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      # The updater endpoint is a plain file on the release:
+      # .../releases/latest/download/latest.json. Build it from the signatures
+      # every platform uploaded, so it can never disagree with the assets that
+      # are actually there.
+      - name: Build updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="v$VERSION"
+
+          # The plugin looks up `{os}-{arch}-{installer}` first and falls back to
+          # `{os}-{arch}`, where {installer} is baked into the running binary by
+          # the bundler. That marker only exists on Linux, so deb and rpm get
+          # explicit keys and everything else rides the bare fallback.
+          key_for() {
+            case "$1" in
+              # bundle.targets no longer builds MSI (the updater can't tell an
+              # MSI install from an NSIS one, so it would install NSIS over it);
+              # this stays as a guard in case the target ever comes back.
+              *.msi)          echo "" ;;
+              *.exe)          echo "windows-x86_64" ;;
+              *.AppImage)     echo "linux-x86_64" ;;
+              *.deb)          echo "linux-x86_64-deb" ;;
+              *.rpm)          echo "linux-x86_64-rpm" ;;
+              *.app.tar.gz)
+                case "$1" in
+                  *x64*|*x86_64*) echo "darwin-x86_64" ;;
+                  *)              echo "darwin-aarch64" ;;  # CI builds macOS on Apple Silicon only
+                esac ;;
+              *) echo "" ;;
+            esac
+          }
+
+          # Every asset of these kinds must end up in the manifest. If one loses
+          # its signature (renamed artifact, signing skipped), the release would
+          # otherwise ship a manifest that silently strands that install type.
+          mapfile -t ASSETS < <(gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name')
+
+          mkdir -p sigs && cd sigs
+          # Non-zero when the release carries no .sig at all; the checks below
+          # report that far more clearly than gh's own error.
+          gh release download "$TAG" --repo "$REPO" --pattern '*.sig' || true
+
+          platforms='{}'
+          missing=()
+          for asset in "${ASSETS[@]}"; do
+            key=$(key_for "$asset")
+            [ -n "$key" ] || continue
+            if [ ! -f "$asset.sig" ]; then
+              missing+=("$asset")
+              continue
+            fi
+            url="https://github.com/$REPO/releases/download/$TAG/$(jq -rn --arg s "$asset" '$s|@uri')"
+            platforms=$(jq --arg k "$key" --arg sig "$(cat "$asset.sig")" --arg url "$url" \
+              '.[$k] = {signature: $sig, url: $url}' <<< "$platforms")
+            echo "$key -> $asset"
+          done
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::updater artifacts without a signature on $TAG: ${missing[*]}"
+            exit 1
+          fi
+
+          # One bare key per matrix platform: proof all three jobs contributed.
+          for key in windows-x86_64 darwin-aarch64 linux-x86_64; do
+            if [ "$(jq --arg k "$key" 'has($k)' <<< "$platforms")" != "true" ]; then
+              echo "::error::no updater artifact for $key on $TAG"
+              exit 1
+            fi
+          done
+
+          jq -n --arg v "$VERSION" \
+                --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg n "Memory Card $TAG" \
+                --argjson p "$platforms" \
+                '{version: $v, notes: $n, pub_date: $d, platforms: $p}' > latest.json
+          cat latest.json
+
+          gh release upload "$TAG" latest.json --clobber --repo "$REPO"
 
       - name: Un-draft the release
         env:

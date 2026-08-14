@@ -32,9 +32,21 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Sluicee/memory-card/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGRUZCNUI4MzYyNTU4MkUKUldRdVdDVTJ1TFh2TDIwZkNpYWVlUVZZWjVudFl6cDhFdHI3WlFCU2RvVkVwbzV6emxoWk9oV0wK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg", "deb", "rpm", "appimage", "nsis"],
+    "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/ffmpeg"
     ],

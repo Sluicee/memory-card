@@ -45,6 +45,8 @@ tauri-plugin-autostart = "2"
 discord-rich-presence = "0.2.4"
 any_ascii = "0.3.3"
 tiny_http = "0.12"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
 
 # Reaches into the raw WebKitWebView (via Webview::with_webview, see lib.rs)
 # to force hardware-acceleration-policy=Always — Tauri doesn't expose this

@@ -24,6 +24,10 @@ struct UpdateCheck {
     version: String,
     url: String,
     is_available: bool,
+    /// Whether this particular build can install the update in place via
+    /// tauri-plugin-updater. When false the UI falls back to opening the
+    /// release page in a browser — see `auto_update_supported` below.
+    can_auto_update: bool,
 }
 
 // ── Dialog commands ───────────────────────────────────────────────────────────
@@ -345,6 +349,51 @@ fn set_discord_rpc_enabled(
 
 // ── Update Commands ──────────────────────────────────────────────────────────
 
+/// Is this particular build one tauri-plugin-updater can replace in place?
+///
+/// The Windows NSIS install and the macOS .app always are. Linux depends on how the
+/// binary was packaged, which the bundler records in the binary itself — see
+/// `tauri::utils::platform::bundle_type`.
+fn auto_update_supported() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::utils::{config::BundleType, platform::bundle_type};
+
+        match bundle_type() {
+            // The plugin swaps the file $APPIMAGE points at, so it needs that
+            // var — set by the AppImage runtime, missing if the binary was
+            // extracted out of the image and run directly.
+            Some(BundleType::AppImage) => std::env::var_os("APPIMAGE").is_some(),
+            // These go through `dpkg -i` / `rpm -U` under pkexec.
+            Some(BundleType::Deb) => native_package_manager_usable("dpkg"),
+            Some(BundleType::Rpm) => native_package_manager_usable("rpm"),
+            // No marker: a raw binary or a repackage we know nothing about.
+            _ => false,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+/// Guards the .deb/.rpm path against systems where handing the package to
+/// dpkg/rpm would be wrong or would simply fail.
+///
+/// The AUR package repackages our .deb, so an Arch install carries the Deb
+/// marker while pacman owns every file it unpacked — dpkg must not touch those,
+/// and updates there belong to `pacman -Syu` anyway.
+#[cfg(target_os = "linux")]
+fn native_package_manager_usable(tool: &str) -> bool {
+    if std::path::Path::new("/etc/arch-release").exists() {
+        return false;
+    }
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| dir.join(tool).is_file())
+}
+
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheck, String> {
     let current_version_str = app.config().version.as_ref().ok_or("No version in tauri.conf.json")?;
@@ -379,6 +428,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheck, String>
         version: latest_tag.to_string(),
         url: download_url.to_string(),
         is_available: latest_v > current_v,
+        can_auto_update: auto_update_supported(),
     })
 }
 
@@ -405,6 +455,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let player = create_player(app.handle().clone());
             app.manage(player);

@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { scanFolder, refreshLibrary, clearLibrary } from '../stores/library';
   import { scanClipFolder, refreshClipLibrary, clearClipLibrary } from '../stores/clips';
-  import { updateInfo } from '../stores/updates';
+  import { updateInfo, updateProgress, installUpdate, clearUpdateError } from '../stores/updates';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
   import { getVersion } from '@tauri-apps/api/app';
@@ -35,6 +35,10 @@
   let appVersion = $state('');
 
   onMount(async () => {
+    // Прошлая неудачная попытка не должна встречать пользователя надписью
+    // «Ошибка обновления» через полчаса после самой ошибки.
+    clearUpdateError();
+
     try {
       appVersion = await getVersion();
     } catch (e) {
@@ -142,17 +146,45 @@
     if (e.target === e.currentTarget) handleClose();
   }
 
-  function getUpdate() {
-    if ($updateInfo) {
-      playUiSfx('confirm');
+  // Пока апдейт качается, кнопка занята — стадия живёт в сторе, поэтому
+  // прогресс не теряется, если закрыть и снова открыть меню.
+  const updateBusy = $derived(
+    $updateProgress.stage !== 'idle' && $updateProgress.stage !== 'error'
+  );
+
+  async function getUpdate() {
+    if (!$updateInfo || updateBusy) return;
+    playUiSfx('confirm');
+
+    if (!$updateInfo.can_auto_update) {
       openUrl($updateInfo.url);
       handleClose(false);
+      return;
     }
+
+    // Ушли в браузер (нет latest.json для этого релиза) — меню закрываем,
+    // как и в старом поведении. При ошибке остаёмся, чтобы показать её.
+    if (await installUpdate() === 'fallback') handleClose(false);
   }
+
+  const updateLabel = $derived.by(() => {
+    if (!$updateInfo) return '';
+    switch ($updateProgress.stage) {
+      case 'preparing':  return $t('updatePreparing');
+      case 'downloading':
+        return $updateProgress.ratio === null
+          ? $t('updatePreparing')
+          : $t('updateDownloading', Math.round($updateProgress.ratio * 100));
+      case 'installing': return $t('updateInstalling');
+      case 'restarting': return $t('updateRestarting');
+      case 'error':      return $t('updateFailed');
+      default:           return $t('getUpdate', $updateInfo.version);
+    }
+  });
 
   // updateItem отдельно, чтобы не путать с колонками
   const updateItem = $derived(
-    $updateInfo ? { label: $t('getUpdate', $updateInfo.version), action: getUpdate } : null
+    $updateInfo ? { label: updateLabel, action: getUpdate } : null
   );
 
   import { isEqualizerOpen } from '$lib/stores/equalizer';
@@ -262,11 +294,26 @@
 >
   <nav class="menu">
     {#if updateItem}
-      <button
-        class="menu-item full-width highlight"
-        class:gp-focused={gpIdx === 0}
-        onclick={updateItem.action}
-      >{updateItem.label}</button>
+      <div class="update-slot">
+        <button
+          class="menu-item full-width highlight"
+          class:gp-focused={gpIdx === 0}
+          class:busy={updateBusy}
+          class:failed={$updateProgress.stage === 'error'}
+          disabled={updateBusy}
+          onclick={updateItem.action}
+        >{updateItem.label}</button>
+        {#if updateBusy}
+          <div class="update-bar" class:indeterminate={$updateProgress.ratio === null}>
+            <div
+              class="update-bar-fill"
+              style:width={$updateProgress.ratio !== null
+                ? `${$updateProgress.ratio * 100}%`
+                : undefined}
+            ></div>
+          </div>
+        {/if}
+      </div>
     {/if}
 
     <div class="columns">
@@ -387,6 +434,53 @@
   .menu-item.highlight {
     color: var(--track-active);
     animation: pulse 1.5s infinite ease-in-out;
+  }
+
+  /* Во время загрузки пульсация уступает место полосе прогресса */
+  .menu-item.busy {
+    animation: none;
+    cursor: default;
+  }
+
+  .menu-item.failed {
+    animation: none;
+    color: var(--text-secondary);
+  }
+
+  .update-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .update-bar {
+    height: 4px;
+    margin: 0 28px 6px;
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .update-bar-fill {
+    height: 100%;
+    width: 0;
+    background: var(--track-active);
+    box-shadow: 0 0 6px var(--track-active);
+    border-radius: 2px;
+    transition: width 0.12s linear;
+  }
+
+  /* Размер файла ещё неизвестен (сервер не прислал Content-Length) —
+     показываем бегущий блик вместо конкретного процента. */
+  .update-bar.indeterminate .update-bar-fill {
+    width: 35%;
+    transition: none;
+    animation: sweep 1.1s ease-in-out infinite;
+  }
+
+  @keyframes sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(286%); }
   }
 
   @keyframes pulse {
