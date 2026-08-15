@@ -47,6 +47,8 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "m4v", "webm", "avi", "mov", "wmv", "flv", "mpg", "mpeg", "ts", "m2ts",
 ];
 const THUMB_SEEK_SECS: f64 = 0.5;
+/// Threads a single thumbnail decode may use; see scan_clip_folder's pool.
+const THUMB_DECODE_THREADS: usize = 2;
 const THUMB_MAX_W: u32 = 480;
 // How many frames the `thumbnail` filter scans (starting at THUMB_SEEK_SECS)
 // before picking the most representative one. ~30 frames covers roughly
@@ -85,7 +87,12 @@ fn probe_and_thumbnail(app: &tauri::AppHandle, path: &Path, thumbs_dir: &Path) -
         n = THUMB_CANDIDATE_FRAMES,
         w = THUMB_MAX_W,
     );
-    cmd.args(["-n", "-ss", &format!("{:.3}", THUMB_SEEK_SECS)])
+    // Cap the decoder's own threads. Left to itself ffmpeg will happily use
+    // every core for a single file — measured at 570% CPU for one 4K AV1
+    // thumbnail — which is fine alone and ruinous in parallel; see
+    // scan_clip_folder's pool.
+    cmd.args(["-threads", &THUMB_DECODE_THREADS.to_string()])
+        .args(["-n", "-ss", &format!("{:.3}", THUMB_SEEK_SECS)])
         .args(["-i", &path_str])
         .args(["-frames:v", "1", "-vf", &vf, "-q:v", "4"])
         .arg(&thumb_path);
@@ -140,7 +147,23 @@ pub fn scan_clip_folder(folder_path: &str, app: &tauri::AppHandle, thumbs_dir: &
     let app_ref = app.clone();
     let cnt = Arc::clone(&counter);
 
-    let mut clips: Vec<Clip> = paths
+    // Bounded on purpose. `par_iter` on the global pool runs one task per
+    // core, and each task is an ffmpeg that is itself multi-threaded: twelve
+    // cores' worth of workers each asking for roughly six cores' worth of
+    // decoding is a machine that stops responding, which is exactly what a
+    // scan of 4K sources did. Workers times THUMB_DECODE_THREADS is kept under
+    // the core count so the desktop still has something to run on.
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .div_ceil(3)
+        .clamp(1, 4);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(workers)
+        .build()
+        .ok();
+
+    let scan = || paths
         .par_iter()
         .filter_map(|path| {
             let result = probe_and_thumbnail(&app_ref, path, thumbs_dir);
@@ -153,7 +176,14 @@ pub fn scan_clip_folder(folder_path: &str, app: &tauri::AppHandle, thumbs_dir: &
             }
             result
         })
-        .collect();
+        .collect::<Vec<Clip>>();
+
+    let mut clips = match &pool {
+        Some(pool) => pool.install(scan),
+        // A pool that failed to build is not a reason to refuse to scan; the
+        // global one is oversubscribed, not broken.
+        None => scan(),
+    };
 
     clips.sort_by(|a, b| a.title.cmp(&b.title));
     clips
