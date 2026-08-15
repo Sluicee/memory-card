@@ -120,6 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write # to dispatch publish-aur at the end
     steps:
       - uses: actions/checkout@v4
 
@@ -212,3 +213,16 @@ jobs:
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           gh release edit "v$VERSION" --draft=false --repo "${{ github.repository }}"
+
+      # Un-drafting above raises `release: published`, but GitHub drops events
+      # raised by GITHUB_TOKEN, so publish-aur would never start on its own.
+      # workflow_dispatch is exempt from that rule, so ask for it explicitly.
+      - name: Publish to the AUR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          gh workflow run aur.yml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref_name }}" \
+            -f tag="v$VERSION"

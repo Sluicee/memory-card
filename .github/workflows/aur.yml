@@ -1,8 +1,17 @@
 name: "publish-aur"
 
 on:
+  # Only fires for a release published by hand. The pipeline's own
+  # finalize-release un-drafts with GITHUB_TOKEN, and GitHub never starts a
+  # workflow from an event that token raised — so it dispatches the job below
+  # instead. workflow_dispatch is one of the two triggers exempt from that rule.
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to push to the AUR, e.g. v2.0.0"
+        required: true
 
 jobs:
   aur:
@@ -26,7 +35,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="${{ github.event.release.tag_name }}"
+          TAG_NAME="${{ inputs.tag || github.event.release.tag_name }}"
           VERSION="${TAG_NAME#v}"
           echo "Updating AUR package for published release $TAG_NAME (version: $VERSION)"
 
