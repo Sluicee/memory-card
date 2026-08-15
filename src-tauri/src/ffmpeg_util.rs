@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use tauri::AppHandle;
 
 /// Resolves ffmpeg to either the bundled production binary (`<exe_dir>/bin/ffmpeg[.exe]`)
@@ -33,12 +35,61 @@ pub struct ProbeInfo {
     pub audio_codec: Option<String>,
 }
 
+/// Probe results, keyed by path + mtime + size so an edited file re-probes.
+///
+/// A probe costs a whole ffmpeg process spawn plus waiting for it to exit, and
+/// the clip player asks for the same file repeatedly — once per open and again
+/// on every seek, since a seek re-requests the stream. Caching turns all but
+/// the first of those into a map lookup.
+static PROBE_CACHE: Mutex<Option<HashMap<ProbeKey, ProbeInfo>>> = Mutex::new(None);
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct ProbeKey {
+    path: String,
+    mtime: Option<u64>,
+    len: Option<u64>,
+}
+
+fn probe_key(path: &str) -> ProbeKey {
+    let meta = std::fs::metadata(path).ok();
+    ProbeKey {
+        path: path.to_string(),
+        mtime: meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()),
+        len: meta.as_ref().map(|m| m.len()),
+    }
+}
+
 /// Runs `ffmpeg -i <path>` just to capture its header-analysis stderr, with
 /// no output file (errors out immediately after printing it) — the same
 /// zero-extra-dependency probing trick as `parse_probe_stderr`, just doing
 /// the spawn+capture itself rather than parsing stderr someone else already
-/// captured.
+/// captured. Cached; see PROBE_CACHE.
 pub fn probe_file(app: &AppHandle, path: &str) -> ProbeInfo {
+    let key = probe_key(path);
+    if let Ok(guard) = PROBE_CACHE.lock() {
+        if let Some(hit) = guard.as_ref().and_then(|m| m.get(&key)) {
+            return hit.clone();
+        }
+    }
+
+    let info = probe_file_uncached(app, path);
+
+    // Only cache a probe that found something. A failed spawn returns the
+    // default, and caching that would make one transient failure permanent for
+    // the rest of the session.
+    if info.video_codec.is_some() || info.duration_secs.is_some() {
+        if let Ok(mut guard) = PROBE_CACHE.lock() {
+            guard.get_or_insert_with(HashMap::new).insert(key, info.clone());
+        }
+    }
+    info
+}
+
+fn probe_file_uncached(app: &AppHandle, path: &str) -> ProbeInfo {
     let Ok(mut cmd) = build_ffmpeg_command(app) else { return ProbeInfo::default() };
     cmd.args(["-hide_banner", "-i", path]);
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());

@@ -28,14 +28,14 @@
   // single instance's lifetime. `box` only matters for the *transcode*
   // fallback path (clip_stream_server.rs ignores it for a remux, which
   // always sends the source's own resolution) — it tracks .stage's actual
-  // measured size (see measureTargetLongSide/handleStageResize below) so a
+  // measured size (see measureTargetRect/handleStageResize below) so a
   // transcode targets exactly what's going to be displayed, whatever the
   // window size, fullscreen or not.
   //
   // svelte-ignore state_referenced_locally -- see above; only `box` itself
   // needs to be reactive here, which it is ($state, reassigned by
   // handleStageResize).
-  let box = $state(computePlaybackBox(clip, PLAYBACK_BOUND_MIN));
+  let box = $state(computePlaybackBox(clip, { w: PLAYBACK_BOUND_MIN, h: PLAYBACK_BOUND_MIN }));
 
   let videoEl: HTMLVideoElement;
 
@@ -71,6 +71,84 @@
   let started = $state(false);
   let buffering = $state(false);
 
+  // Whether the picture has actually stopped, which is not the same question
+  // as whether the element reported `waiting`.
+  //
+  // `waiting` fires for momentary dips the viewer never sees: the transcode
+  // briefly has nothing queued, the element says so, and playback carries on
+  // regardless. Gating the placeholder on that event — even behind a delay —
+  // flashes it over a video that never stopped. So watch the only thing that
+  // answers the actual question: whether currentTime is still advancing. The
+  // placeholder appears only once it has stopped advancing, and disappears the
+  // moment it resumes, whatever the element is reporting meanwhile.
+  //
+  // The initial load bypasses this via `!started` in the template — there is
+  // no picture to keep showing then, so it should appear immediately.
+  const FREEZE_CHECK_MS = 400;
+  let stalled = $state(false);
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function stopFreezeWatch() {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = null;
+    stalled = false;
+  }
+
+  $effect(() => {
+    if (!buffering) {
+      stopFreezeWatch();
+      return;
+    }
+    if (stallTimer) return;
+
+    let lastSeen = videoEl?.currentTime ?? 0;
+    const check = () => {
+      const now = videoEl?.currentTime ?? 0;
+      // A hair of tolerance: currentTime can report the same frame twice
+      // without playback having actually stopped.
+      if (now > lastSeen + 0.02) {
+        lastSeen = now;
+        stalled = false;
+        stallTimer = setTimeout(check, FREEZE_CHECK_MS);
+      } else {
+        // Keep watching rather than latching: if time starts moving again
+        // before the element gets around to reporting it, the placeholder
+        // should come straight back off.
+        stalled = true;
+        stallTimer = setTimeout(check, FREEZE_CHECK_MS);
+      }
+    };
+    stallTimer = setTimeout(check, FREEZE_CHECK_MS);
+  });
+
+  /**
+   * Resolves once the element holds a decoded frame (readyState >= 2).
+   *
+   * Starting playback before that is what let sound and the timer run ahead of
+   * the picture: on the transcode path the Opus side is ready almost at once
+   * while the video encoder is still producing its first frames, so play()
+   * would begin on audio alone. The timeout is a safety valve — a stream that
+   * never delivers a frame must still leave a working play button rather than
+   * an interface that waits forever.
+   */
+  function waitForFirstFrame(el: HTMLVideoElement, timeoutMs = 10000): Promise<void> {
+    if (el.readyState >= 2) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        el.removeEventListener("loadeddata", done);
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      el.addEventListener("loadeddata", done);
+    });
+  }
+
+  // The size the stream was last actually requested at. Compared against
+  // rather than `box` so a resize that lands back on a size already being
+  // served costs nothing.
+  let servedBox = { w: 0, h: 0 };
+
   async function doSeek(secs: number, targetBox: { w: number; h: number } = box) {
     // Set *before* load(), not left to the native `waiting` event — that
     // event is for stalling mid-playback when data runs out, not
@@ -83,9 +161,24 @@
     seekBaseSecs = secs;
     playedSecs = 0;
     const wasPlaying = !videoEl.paused;
+    servedBox = targetBox;
+
+    // Tear the old stream down *before* asking for the new one — the same
+    // dance onDestroy does, and for the same reason. Simply assigning a new
+    // src does not abort the request in flight; the element goes on reading
+    // the old response until it is collected, so the server keeps its ffmpeg
+    // alive. Measured on a live seek: two transcodes running side by side for
+    // 37 seconds straight, together eating 4.5-7.8 cores, neither able to hold
+    // realtime — which is the buffering that never recovers, the audio
+    // breaking up, and the timer running on over a picture that has stopped.
+    videoEl.pause();
+    videoEl.removeAttribute("src");
+    videoEl.load();
+
     videoEl.src = await buildClipStreamUrl(clip.path, secs, targetBox);
     videoEl.load();
     if (wasPlaying) {
+      await waitForFirstFrame(videoEl);
       try {
         await videoEl.play();
       } catch {
@@ -102,9 +195,21 @@
   // the screen is that times this scale.
   const ROOT_SCALE = 1.5;
 
-  function measureTargetLongSide(): number {
-    const side = stageEl ? Math.max(stageEl.clientWidth, stageEl.clientHeight) * ROOT_SCALE : 0;
-    return Math.min(PLAYBACK_BOUND_MAX, Math.max(PLAYBACK_BOUND_MIN, side || PLAYBACK_BOUND_MIN));
+  // The area the video is actually displayed in, in real screen pixels. Both
+  // dimensions matter: computePlaybackBox fits the clip into this rectangle,
+  // so a shape mismatch between clip and stage no longer costs encoded pixels
+  // that never reach the screen.
+  function measureTargetRect(): { w: number; h: number } {
+    const w = (stageEl?.clientWidth ?? 0) * ROOT_SCALE;
+    const h = (stageEl?.clientHeight ?? 0) * ROOT_SCALE;
+    if (!w || !h) return { w: PLAYBACK_BOUND_MIN, h: PLAYBACK_BOUND_MIN };
+
+    // The bounds apply to the longer side; the shorter one follows so the
+    // rectangle keeps the stage's shape.
+    const long = Math.max(w, h);
+    const clamped = Math.min(PLAYBACK_BOUND_MAX, Math.max(PLAYBACK_BOUND_MIN, long));
+    const k = clamped / long;
+    return { w: w * k, h: h * k };
   }
 
   // Re-requests the stream at the current position, at the new target
@@ -114,12 +219,24 @@
   // (server-side box is ignored there), but cheap either way, and this
   // component has no way to know in advance which path a given clip will
   // take.
+  // Debounced deliberately, not out of politeness. Re-requesting restarts the
+  // whole pipeline, and load() blanks the element, which changes layout, which
+  // resizes the stage — so an immediate re-request feeds itself. Entering
+  // fullscreen also walks through several window configures in a row (see
+  // windowManager), each its own resize. Undebounced that produced a run of
+  // restarts: load, one frame, load again, until the size finally settled.
+  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+
   function handleStageResize() {
-    const nextBox = computePlaybackBox(clip, measureTargetLongSide());
-    if (nextBox.w === box.w && nextBox.h === box.h) return;
-    box = nextBox;
-    if (!started) return;
-    doSeek(absolutePosition, nextBox);
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = null;
+      const nextBox = computePlaybackBox(clip, measureTargetRect());
+      if (nextBox.w === servedBox.w && nextBox.h === servedBox.h) return;
+      box = nextBox;
+      if (!started) return;
+      doSeek(absolutePosition, nextBox);
+    }, 700);
   }
 
   $effect(() => {
@@ -169,7 +286,17 @@
     if (barEl?.hasPointerCapture(event.pointerId)) {
       barEl.releasePointerCapture(event.pointerId);
     }
+    onMouseMove(); // restart the auto-hide countdown the drag was holding off
     await doSeek(next);
+  }
+
+  // Backstop for a drag that ends without the bar hearing about it — a lost
+  // pointer capture, or a pointercancel from the compositor. Without this the
+  // component would sit with isDragging stuck true, showing a drag position
+  // that never becomes a seek.
+  function onWindowPointerEnd(event: PointerEvent) {
+    if (!isDragging || activePointerId !== event.pointerId) return;
+    void handlePointerUp(event);
   }
 
   let canSeek = $derived(clipDurationVal > 0);
@@ -188,7 +315,14 @@
   function onMouseMove() {
     controlsVisible = true;
     if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => (controlsVisible = false), 2500);
+    // Never auto-hide mid-drag. Hidden controls get `pointer-events: none`,
+    // so the progress bar losing visibility while the pointer is down means
+    // the pointerup never reaches it and the seek is silently dropped — and
+    // holding a drag still enough to outlast this timer is easy, especially
+    // in fullscreen where the bar is long.
+    hideTimer = setTimeout(() => {
+      if (!isDragging) controlsVisible = false;
+    }, 2500);
   }
 
   function onTimeUpdate() {
@@ -226,7 +360,7 @@
 
     // Real measurement now that .stage actually exists and is laid out —
     // the $state initializer above only had a placeholder to work with.
-    box = computePlaybackBox(clip, measureTargetLongSide());
+    box = computePlaybackBox(clip, measureTargetRect());
     if (stageEl) {
       // Also fires once immediately on observe() with the current size —
       // harmless no-op here since box already matches (just measured
@@ -245,8 +379,10 @@
     videoEl.addEventListener("pause", onPauseEvt);
     videoEl.addEventListener("ended", close);
 
+    servedBox = box;
     videoEl.src = await buildClipStreamUrl(clip.path, 0, box);
     videoEl.load();
+    await waitForFirstFrame(videoEl);
     try {
       await videoEl.play();
     } catch {
@@ -254,10 +390,16 @@
     }
 
     hideTimer = setTimeout(() => (controlsVisible = false), 2500);
+    window.addEventListener("pointerup", onWindowPointerEnd);
+    window.addEventListener("pointercancel", onWindowPointerEnd);
   });
 
   onDestroy(() => {
+    window.removeEventListener("pointerup", onWindowPointerEnd);
+    window.removeEventListener("pointercancel", onWindowPointerEnd);
+    if (stallTimer) clearTimeout(stallTimer);
     if (hideTimer) clearTimeout(hideTimer);
+    if (resizeTimer) clearTimeout(resizeTimer);
     resizeObserver?.disconnect();
     if (videoEl) {
       videoEl.removeEventListener("timeupdate", onTimeUpdate);
@@ -366,7 +508,7 @@
     <!-- svelte-ignore a11y_media_has_caption -->
     <video bind:this={videoEl} playsinline></video>
 
-    {#if !started || buffering}
+    {#if !started || stalled}
       <div class="load-placeholder">
         {#if clip.thumbnail}
           <img class="load-thumb" src={convertFileSrc(clip.thumbnail)} alt="" />

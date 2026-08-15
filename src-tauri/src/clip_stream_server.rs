@@ -112,8 +112,8 @@ fn handle_request(app: &AppHandle, expected_token: &str, request: tiny_http::Req
         .map(|s| s.split(',').map(|c| c.to_lowercase()).collect())
         .unwrap_or_default();
 
-    let mut child = match spawn_stream(app, path, seek_secs, w, h, &playable) {
-        Ok(c) => ChildGuard(c),
+    let (child, remux) = match spawn_stream(app, path, seek_secs, w, h, &playable) {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("clip_stream_server: failed to spawn ffmpeg: {}", e);
             let _ = request.respond(tiny_http::Response::empty(500));
@@ -121,18 +121,65 @@ fn handle_request(app: &AppHandle, expected_token: &str, request: tiny_http::Req
         }
     };
 
-    let Some(stdout) = child.0.stdout.take() else {
+    let mut child = ChildGuard(child);
+
+    let Some(mut stdout) = child.0.stdout.take() else {
         let _ = request.respond(tiny_http::Response::empty(500));
         return;
     };
 
+    // Hold back the first moments of a transcode so the player starts with a
+    // cushion instead of immediately catching up to the encoder.
+    //
+    // A realtime VP9 encode does not reach its steady rate instantly: measured
+    // on a 4K AV1 source it runs at ~0.8x realtime for roughly the first
+    // second before settling at ~2.4x. A media element handed that stream
+    // starts playing as soon as it has a frame, drains the little that exists,
+    // and then spends about five seconds alternating between playing and
+    // waiting before the encoder pulls ahead — the "video freezes after
+    // seeking" symptom. Measured in a WebKit harness against this exact
+    // pipeline: without this, position after a seek crawls 0.00 -> 0.04 ->
+    // 0.31 -> 0.63 over the first seconds; with it, 0.13 -> 1.14 -> 2.15 at a
+    // steady 1x. The cost is ~0.6s more before playback begins.
+    //
+    // Remux is excluded: a stream copy is limited by disk read speed, not an
+    // encoder, so it has no warm-up to absorb and would only buffer needlessly.
+    let prebuffer = if remux { Vec::new() } else { prebuffer_stream(&mut stdout) };
+
     let content_type = tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"video/webm"[..]).unwrap();
-    let response = tiny_http::Response::new(200.into(), vec![content_type], stdout, None, None);
+    let body = std::io::Read::chain(std::io::Cursor::new(prebuffer), stdout);
+    let response = tiny_http::Response::new(200.into(), vec![content_type], body, None, None);
 
     // Blocks until the client disconnects (or the stream ends on its own)
     // — the response streams straight from ffmpeg's stdout. Dropping
     // `child` afterward (ChildGuard) kills+reaps it either way.
     let _ = request.respond(response);
+}
+
+/// How long to let a transcode run before the client sees any of it, and the
+/// most that may be held while doing so. The duration comes from measurement
+/// (see the call site); the byte cap only exists so an unexpectedly fast or
+/// high-bitrate stream cannot balloon this buffer.
+const PREBUFFER: std::time::Duration = std::time::Duration::from_millis(1500);
+const PREBUFFER_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+fn prebuffer_stream(stdout: &mut std::process::ChildStdout) -> Vec<u8> {
+    use std::io::Read;
+
+    let deadline = std::time::Instant::now() + PREBUFFER;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+
+    // Reads block, so the deadline is checked between them rather than
+    // interrupting one: overshooting by a single chunk is harmless, and
+    // blocking on the *first* chunk is exactly the wait we want anyway.
+    while std::time::Instant::now() < deadline && buf.len() < PREBUFFER_MAX_BYTES {
+        match stdout.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+    }
+    buf
 }
 
 /// True when the source's own video/audio codecs need no re-encoding: the
@@ -157,51 +204,85 @@ fn spawn_stream(
     w: u32,
     h: u32,
     playable: &[String],
-) -> Result<Child, String> {
+) -> Result<(Child, bool), String> {
     let probe = probe_file(app, path);
     let remux = is_remux_safe(&probe, playable);
 
     let mut cmd = build_ffmpeg_command(app)?;
 
-    // Two-stage seek, same reasoning as the old clip_video.rs: a coarse
-    // pre-input `-ss` gets close fast (keyframe-snapped), then a fine
-    // post-input `-ss` decodes-and-discards the remainder for an exact
-    // start point instead of jumping to the nearest keyframe. For remux
-    // (stream copy) this fine seek can only land on the nearest keyframe
-    // too — copy mode can't decode-and-discard — but that's an accepted,
-    // inherent limitation of not re-encoding, not a bug: still bounded to
-    // within ~2s of the requested position.
-    let coarse_seek = (seek_secs - 2.0).max(0.0);
-    let fine_seek = seek_secs - coarse_seek;
-
-    if coarse_seek > 0.0 {
-        cmd.args(["-ss", &format!("{:.3}", coarse_seek)]);
+    // Single pre-input `-ss`: ffmpeg jumps straight to the nearest keyframe at
+    // or before the target and starts there. This used to be a two-stage seek,
+    // where a second post-input `-ss` decoded-and-discarded up to two more
+    // seconds to land on the exact frame — accuracy paid for with the one
+    // thing a seek cannot afford, latency, and paid on every seek. Landing on
+    // a keyframe is what ordinary players do, and it is bounded by the
+    // source's keyframe interval.
+    if seek_secs > 0.0 {
+        cmd.args(["-ss", &format!("{:.3}", seek_secs)]);
     }
     cmd.arg("-i").arg(path);
-    if fine_seek > 0.0 {
-        cmd.args(["-ss", &format!("{:.3}", fine_seek)]);
-    }
 
     cmd.args(["-map", "0:v:0", "-map", "0:a:0?"]);
 
     if remux {
         cmd.args(["-c:v", "copy", "-c:a", "copy"]);
     } else {
-        let vf = format!(
-            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
-        );
+        // Fit inside the box without padding out to it. The old filter chain
+        // letterboxed here with `pad`, which meant encoding black bars as if
+        // they were picture: a 2880x2160 source fits 1440x1080, and padding
+        // that to 1920x1080 is a third more pixels per frame, all of them
+        // black. The player letterboxes on its own (the element is
+        // max-width/max-height bound over a black stage), so those bars were
+        // pure cost. `force_divisible_by=2` keeps the result encodable.
+        let vf =
+            format!("scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2");
         cmd.args(["-vf", &vf])
-            .args(["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "5"])
-            .args(["-crf", "32", "-b:v", "0"])
+            // `-cpu-used 6`, measured against 8 on a 4K AV1 source into a
+            // 1920 box: identical throughput (2.28x realtime both), but 6
+            // reaches the same quality at a lower bitrate, so 8 was giving up
+            // compression efficiency for nothing.
+            .args(["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "6"])
+            // A target bitrate, and deliberately no `-crf`.
+            //
+            // With a CRF set, libvpx encodes for constant quality, and under
+            // `-deadline realtime` that lands around 1.3 Mbit/s at 1080p no
+            // matter what bitrate it is offered — measured: crf 26 gave 1319
+            // kbit/s, tightening to crf 22 moved it only to 1514, and adding
+            // `-b:v 6M` alongside crf 26 changed nothing at all (1257). That is
+            // roughly 720p worth of detail on a 1080p picture, which is exactly
+            // what it looked like. Dropping CRF and asking for a plain target
+            // yields 5983 kbit/s for a throughput cost of 2.28x -> 1.85x.
+            //
+            // Scaled by pixel count so a windowed view is not handed a
+            // fullscreen bitrate: ~3 bits per pixel per second, which is the
+            // 6 Mbit/s measured as good at 1920x1080. The stream never leaves
+            // localhost, so the ceiling is generous.
+            .args([
+                "-b:v",
+                &format!("{}k", (u64::from(w) * u64::from(h) * 3 / 1000).clamp(1500, 12000)),
+            ])
             .args(["-c:a", "libopus", "-b:a", "128k"]);
     }
 
-    cmd.args(["-f", "webm"]).arg("pipe:1");
+    // `-live 1` writes the stream without a duration, Cues, or a SeekHead.
+    //
+    // That matters for the remux path specifically. A stream copy carries the
+    // source's duration through into the WebM header even when the output is
+    // a pipe, and a media element that sees a duration concludes the resource
+    // is seekable and starts issuing Range requests. This endpoint has no
+    // Range support — a live stream has no stable byte-to-time mapping — so
+    // every such request just spawned another ffmpeg starting from zero, and
+    // the element retried in a loop instead of ever playing: the clip never
+    // opened, and the log filled with ffmpeg banners. The transcode path never
+    // hit this only because its duration is unknown anyway.
+    cmd.args(["-f", "webm", "-live", "1"]).arg("pipe:1");
 
-    cmd.stdout(Stdio::piped())
+    let child = cmd
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Failed to spawn ffmpeg (clip stream): {}", e))
+        .map_err(|e| format!("Failed to spawn ffmpeg (clip stream): {}", e))?;
+    Ok((child, remux))
 }
 
 fn parse_query(url: &str) -> HashMap<String, String> {

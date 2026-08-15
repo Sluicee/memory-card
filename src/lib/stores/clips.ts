@@ -7,7 +7,7 @@ import { stop as stopMusic } from './player';
 const CLIP_FOLDERS_KEY = 'mp_clip_folders';
 
 // Sanity clamp around whatever ClipPlayerView measures as the actually-
-// available display area (see `measureTargetLongSide` there, driven by a
+// available display area (see `measureTargetRect` there, driven by a
 // ResizeObserver on .stage — covers windowed, fullscreen, and mini modes
 // uniformly by measuring instead of guessing per view mode). Only matters
 // for the *transcode* fallback path (see buildClipStreamUrl/
@@ -35,12 +35,29 @@ const VIDEO_CODEC_PROBES: Array<{ family: string; mimeCodec: string }> = [
   { family: 'av1', mimeCodec: 'video/webm; codecs="av01.0.05M.08"' },
 ];
 
-// canPlayType() lies about AV1 under WebKitGTK: the codec *is* decodable
-// (dav1ddec is present, so the probe says "probably"), but the decoded
-// frames go through glupload on their way to the compositor and come out as
-// a flat green rectangle. Excluding av1 here costs a live VP9 transcode for
-// AV1 clips on Linux, which is the same path every other non-VP9 codec
-// already takes — and it actually renders.
+// canPlayType() answers for whatever engine is actually running, which is
+// exactly right on Windows (WebView2 decodes AV1 itself) and exactly wrong on
+// Linux for AV1 specifically: dav1ddec is present, so the probe says
+// "probably", but its frames reach the compositor as a flat green rectangle —
+// an empty texture. Retested against every rendering configuration this app
+// has used, including with WEBKIT_GST_DMABUF_SINK_DISABLED off, and it
+// survives all of them. It cannot be worked around by depending on another
+// decoder either: there is no other AV1 decoder for GStreamer (gst-libav
+// ships none, and nvav1dec needs hardware AV1 decode).
+//
+// So the exclusion is Linux-only, and costs those clips a transcode. Windows
+// takes the remux path, which is near-free.
+// canPlayType() answers for whatever engine is running — right on Windows,
+// where WebView2 decodes AV1 itself, and wrong on Linux for AV1 specifically.
+// dav1ddec is present so the probe says "probably", but its frames are read
+// back with the wrong stride: 1080p AV1 comes out as structured garbage and
+// 4K degenerates to a flat green rectangle, while VP9 through the identical
+// path is perfect at every resolution tested. Established across every
+// rendering configuration this app has used and every relevant WebKit env var
+// (WEBKIT_GST_DISABLE_GL_SINK, WEBKIT_GST_USE_VIDEOCONVERT_SCALE,
+// WEBKIT_GST_DMABUF_SINK_DISABLED). Not fixable from here: there is no other
+// AV1 decoder for GStreamer, and WebKit's pipeline is not ours to insert a
+// videoconvert into.
 const isLinux = /Linux|X11/.test(navigator.userAgent);
 
 let cachedPlayableCodecs: string[] | null = null;
@@ -57,19 +74,22 @@ export function getPlayableVideoCodecs(): string[] {
 }
 
 /**
- * Aspect-fits a clip's source resolution into a `longSide`-capped box,
- * rounded to even pixels (ffmpeg-friendly). Never scales *up* past the
- * clip's native resolution — `Math.min(1, ...)` was missing before, so any
- * clip with a longer side under the bound (a plausible size for a lot of
- * real clip sources) got upscaled by ffmpeg's own `scale=` filter to
- * exactly fill it, decoding and displaying it visibly blockier than the
- * source ever was — most obvious full-window in fullscreen mode, where
- * canvasScale is closer to 1 and doesn't shrink that blockiness back down.
+ * Fits a clip's source resolution inside `target`, rounded to even pixels
+ * (ffmpeg-friendly). Never scales *up* past the clip's native resolution.
+ *
+ * Fits against both dimensions, not just the longer one. Fitting by the long
+ * side alone ignores the shape of the area the video is actually shown in, and
+ * overshoots badly whenever the two disagree: a 2880x2160 clip in a 1920x1080
+ * fullscreen stage was being encoded at 1920x1440 while only 1440x1080 of it
+ * could ever be displayed — 78% more pixels per frame than reach the screen,
+ * measured at 48% of the transcode's throughput (1.59x realtime against
+ * 2.36x). Those pixels bought nothing: the element is height-limited there and
+ * scales the result down again.
  */
-export function computePlaybackBox(clip: Clip, longSide: number): { w: number; h: number } {
-  const srcW = clip.width || longSide;
-  const srcH = clip.height || Math.round((longSide * 9) / 16);
-  const scale = Math.min(1, longSide / Math.max(srcW, srcH));
+export function computePlaybackBox(clip: Clip, target: { w: number; h: number }): { w: number; h: number } {
+  const srcW = clip.width || target.w;
+  const srcH = clip.height || Math.round((target.w * 9) / 16);
+  const scale = Math.min(1, target.w / srcW, target.h / srcH);
   const w = Math.max(2, Math.round((srcW * scale) / 2) * 2);
   const h = Math.max(2, Math.round((srcH * scale) / 2) * 2);
   return { w, h };

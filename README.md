@@ -107,10 +107,6 @@ Produces a platform-native installer in `src-tauri/target/release/bundle/`.
 - Equalizer gain/preamp is applied by piping audio through the bundled FFmpeg sidecar with an `equalizer`/`volume` filter chain, rather than in-process DSP.
 - Clips are served to a native `<video>` element by a local HTTP server (`127.0.0.1`, OS-assigned port): stream-copied (remuxed) when the source codec is already playable by the webview, otherwise live-transcoded to VP9/Opus WebM — both paths go through the same bundled FFmpeg sidecar.
 
-## Known Issues
-
-- **Choppy fullscreen clip playback on Linux with NVIDIA's proprietary driver.** On some NVIDIA + WebKitGTK combinations, WebKitGTK decides hardware-accelerated video compositing is unavailable at process startup and silently falls back to software video rendering — capping fullscreen clip playback below the source frame rate (e.g. ~20fps instead of 30). This is a known, unresolved upstream WebKitGTK/NVIDIA driver interaction issue (see [tauri-apps/tauri#9394](https://github.com/tauri-apps/tauri/issues/9394) and similar reports across other WebKitGTK-based apps), not something this app can fix — WebKitGTK gives no supported way to override the decision after the fact. Windows (WebView2) and Mesa/open-source-driver Linux setups are not affected.
-
 ## License
 
 This project is licensed under the **GNU General Public License v3.0** (GPLv3). See the [LICENSE](LICENSE) file for details.
