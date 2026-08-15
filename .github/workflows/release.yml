@@ -82,7 +82,33 @@ jobs:
         with:
           tagName: v__VERSION__ # tauri-action automatically replaces this with the version from tauri.conf.json
           releaseName: "Memory Card v__VERSION__"
-          releaseBody: "See the assets below for the installers."
+          # Notes for the release being cut — update this together with the
+          # version bump, it is not generated from anything.
+          releaseBody: |
+            ## Memory Card 2.0
+
+            ### New
+
+            - **Clips** — a music-video tab that scans its own folder and plays videos in-window or fullscreen. Streamed locally through the bundled FFmpeg sidecar (remuxed when the codec is already playable, transcoded to WebM otherwise), so there is nothing to install alongside it.
+            - **Equalizer** — per-band gain with a preamp, applied through FFmpeg audio filters.
+            - **Gamepad navigation** — move through the album grid, lists and menus with a controller.
+            - **In-app updates** — new releases are offered from the options menu and install in place on Windows, macOS and Linux (AppImage, `.deb`, `.rpm`).
+            - **Queue management** — remove single entries from the queue or clear it outright.
+            - **Album sorting modes**, with the sort and page position kept between sessions.
+
+            ### Improved
+
+            - More robust metadata scanning: lofty 0.24, a symphonia duration fallback and filename parsing for untagged files.
+            - Faster clip start-up and seeking, and thumbnail generation no longer saturates every core.
+            - Hardware-accelerated video on Linux, plus steadier fullscreen behaviour on Wayland.
+            - Fixed listening-stats inflation; existing stats are repaired once from the history logs on first launch.
+            - Fixed an equalizer glitch when switching tracks, and the EQ now applies correctly at startup.
+
+            ### Note for 1.4.0 users
+
+            The in-app updater ships **with** this release, so 2.0 itself has to be installed manually — updates from 2.0 onwards are offered inside the app.
+
+            See the assets below for the installers.
           releaseDraft: true # kept as draft here so the release doesn't go public/trigger AUR publishing until every platform in the matrix has uploaded its assets — see finalize-release below
           prerelease: false
           # Each matrix job would otherwise upload its own latest.json and race
