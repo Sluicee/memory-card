@@ -35,21 +35,24 @@
   pointer-events: none;
   z-index: 9999;
 
+  /* Скан-линии — 1×3 PNG-тайл, а не repeating-linear-gradient. С включённым
+     dmabuf-рендерером (WEBKIT_DISABLE_DMABUF_RENDERER больше не форсируется
+     в main.rs — см. там) градиент сэмплируется на GPU с интерполяцией и
+     мелкий шаг превращается в размазанную рампу вместо двух чётких уровней.
+     Тайл повторяет прежнюю геометрию ровно: период 3px, две строки
+     прозрачных + одна rgba(0,0,0,0.13) (альфа 33/255 = 0.1294 — предел
+     8-битной альфы PNG). image-rendering: pixelated обязателен: без него
+     тайл на дробном scale factor фильтруется билинейно и рампа возвращается. */
   background:
-    /* Скан-линии */
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0px,
-      transparent 2px,
-      rgba(0, 0, 0, 0.13) 2px,
-      rgba(0, 0, 0, 0.13) 3px
-    ),
+    url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAADCAYAAABS3WWCAAAADElEQVR42mNgQAaKAAAwACLn1PvwAAAAAElFTkSuQmCC')
+      0 0 / 1px 3px repeat,
     /* Виньетка */
     radial-gradient(
       ellipse at center,
       transparent 55%,
       rgba(0, 0, 0, 0.25) 100%
     );
+  image-rendering: pixelated;
 }
 
 .root.clip-open {

@@ -35,12 +35,21 @@ const VIDEO_CODEC_PROBES: Array<{ family: string; mimeCodec: string }> = [
   { family: 'av1', mimeCodec: 'video/webm; codecs="av01.0.05M.08"' },
 ];
 
+// canPlayType() lies about AV1 under WebKitGTK: the codec *is* decodable
+// (dav1ddec is present, so the probe says "probably"), but the decoded
+// frames go through glupload on their way to the compositor and come out as
+// a flat green rectangle. Excluding av1 here costs a live VP9 transcode for
+// AV1 clips on Linux, which is the same path every other non-VP9 codec
+// already takes — and it actually renders.
+const isLinux = /Linux|X11/.test(navigator.userAgent);
+
 let cachedPlayableCodecs: string[] | null = null;
 
 export function getPlayableVideoCodecs(): string[] {
   if (!cachedPlayableCodecs) {
     const probe = document.createElement('video');
     cachedPlayableCodecs = VIDEO_CODEC_PROBES
+      .filter(({ family }) => !(isLinux && family === 'av1'))
       .filter(({ mimeCodec }) => probe.canPlayType(mimeCodec) !== '')
       .map(({ family }) => family);
   }
