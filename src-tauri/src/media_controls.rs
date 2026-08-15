@@ -3,6 +3,10 @@ use souvlaki::{MediaControls, MediaPlayback, MediaPosition, PlatformConfig};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
+// Only the Windows helpers below need these (`Manager` for get_webview_window),
+// so importing them unconditionally would warn as unused elsewhere.
+#[cfg(target_os = "windows")]
+use tauri::{Manager, Runtime};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, WPARAM};
 #[cfg(target_os = "windows")]
