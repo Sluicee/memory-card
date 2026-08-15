@@ -2,61 +2,20 @@ import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import type { ViewMode } from "$lib/stores/viewMode";
 
-// ─────────────────────────────────────────────────────────────────────────
-// TEMPORARY DIAGNOSTICS — remove once the KWin fullscreen behaviour is
-// understood. Deliberately observes only: no call below this comment changes
-// window state, and nothing is inserted between the existing window calls, so
-// the timing of the sequence being investigated stays as it is in production.
-// ─────────────────────────────────────────────────────────────────────────
-const WM_DEBUG = true;
-const t0 = Date.now();
-const ms = () => String(Date.now() - t0).padStart(6, " ");
-
-async function snapshot(
-  win: ReturnType<typeof getCurrentWindow>,
-  label: string,
-): Promise<void> {
-  if (!WM_DEBUG) return;
-  try {
-    const [fullscreen, resizable, size, pos, monitor] = await Promise.all([
-      win.isFullscreen(),
-      win.isResizable(),
-      win.outerSize(),
-      win.outerPosition(),
-      currentMonitor(),
-    ]);
-    console.log(
-      `[wm ${ms()}ms] ${label}`,
-      `fs=${fullscreen} resizable=${resizable}`,
-      `outer=${size.width}x${size.height} pos=${pos.x},${pos.y}`,
-      monitor
-        ? `monitor=${monitor.size.width}x${monitor.size.height}@${monitor.position.x},${monitor.position.y} sf=${monitor.scaleFactor}`
-        : "monitor=null",
-    );
-  } catch (e) {
-    console.log(`[wm ${ms()}ms] ${label} — snapshot failed`, e);
-  }
-}
-
 // The compositor's own configure events are the part our awaits never see:
 // they land after every call has already returned. Tracking when the last one
 // arrived is what lets settleGeometry() below tell "the window is done moving"
-// from "the window has not started yet"; the logging is diagnostics on top.
+// from "the window has not started yet".
 let lastGeometryEventAt = 0;
 let eventsHooked = false;
 function hookWindowEvents(win: ReturnType<typeof getCurrentWindow>): void {
   if (eventsHooked) return;
   eventsHooked = true;
-  void win.onResized(({ payload }) => {
+  const mark = () => {
     lastGeometryEventAt = Date.now();
-    if (WM_DEBUG)
-      console.log(`[wm ${ms()}ms] << compositor resized to ${payload.width}x${payload.height}`);
-  });
-  void win.onMoved(({ payload }) => {
-    lastGeometryEventAt = Date.now();
-    if (WM_DEBUG)
-      console.log(`[wm ${ms()}ms] << compositor moved to ${payload.x},${payload.y}`);
-  });
+  };
+  void win.onResized(mark);
+  void win.onMoved(mark);
 }
 
 const sleep = (msec: number) => new Promise((r) => setTimeout(r, msec));
@@ -91,22 +50,6 @@ async function settleGeometry(
 export async function updateWindowForViewMode(mode: ViewMode): Promise<void> {
   const win = getCurrentWindow();
   hookWindowEvents(win);
-  await snapshot(win, `mode=${mode} — BEFORE`);
-  try {
-    await applyViewMode(win, mode);
-  } finally {
-    await snapshot(win, `mode=${mode} — AFTER calls`);
-    // Late snapshots: anything that changes between here and +1500ms is the
-    // compositor acting on its own, not us.
-    setTimeout(() => void snapshot(win, `mode=${mode} — +250ms`), 250);
-    setTimeout(() => void snapshot(win, `mode=${mode} — +1500ms`), 1500);
-  }
-}
-
-async function applyViewMode(
-  win: ReturnType<typeof getCurrentWindow>,
-  mode: ViewMode,
-): Promise<void> {
   switch (mode) {
     case "normal":
     case "focus": {
