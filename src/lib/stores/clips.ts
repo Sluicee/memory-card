@@ -61,6 +61,31 @@ export function getPlayableVideoCodecs(): string[] {
   return cachedPlayableCodecs;
 }
 
+/** Audio codecs the WebM remux path accepts, mirroring is_remux_safe's rule. */
+const REMUX_AUDIO = ['opus'];
+
+/**
+ * Whether this clip will be served as a stream copy rather than transcoded.
+ *
+ * Mirrors `is_remux_safe` in clip_stream_server.rs, from the codecs the
+ * scanner recorded. It matters because the target size means nothing on that
+ * path — a stream copy cannot be scaled, so the server sends the source's own
+ * resolution regardless — and re-requesting the stream at a new size is then a
+ * full pipeline restart that changes nothing about the picture, while still
+ * costing a reload and a jump back to the previous keyframe.
+ *
+ * Returns false when the codecs are unknown (a clip scanned before they were
+ * recorded), which keeps the older behaviour rather than guessing.
+ */
+export function isRemuxable(clip: Clip): boolean {
+  const video = clip.video_codec?.toLowerCase();
+  if (!video) return false;
+  const audio = clip.audio_codec?.toLowerCase();
+  return (
+    getPlayableVideoCodecs().includes(video) && (!audio || REMUX_AUDIO.includes(audio))
+  );
+}
+
 /**
  * Fits a clip's source resolution inside `target`, rounded to even pixels
  * (ffmpeg-friendly). Never scales *up* past the clip's native resolution.

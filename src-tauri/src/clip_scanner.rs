@@ -22,6 +22,20 @@ pub struct Clip {
     pub height: u32,
     #[serde(default)]
     pub search_index: String,
+    // Codec names as ffmpeg reports them ("av1", "vp9", "opus"), from the same
+    // probe that already yields duration and resolution — no extra work at
+    // scan time. They let the player tell in advance whether a clip will be
+    // stream-copied or transcoded, which decides whether re-requesting the
+    // stream at a new size means anything (a stream copy cannot be scaled, so
+    // for those it is a pipeline restart that buys nothing).
+    //
+    // `default` so caches written before these existed still load; a clip
+    // without them simply cannot be identified as remuxable and keeps the
+    // older behaviour until it is rescanned.
+    #[serde(default)]
+    pub video_codec: Option<String>,
+    #[serde(default)]
+    pub audio_codec: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -96,6 +110,8 @@ fn probe_and_thumbnail(app: &tauri::AppHandle, path: &Path, thumbs_dir: &Path) -
         width: info.width.unwrap_or(0),
         height: info.height.unwrap_or(0),
         search_index,
+        video_codec: info.video_codec,
+        audio_codec: info.audio_codec,
     })
 }
 

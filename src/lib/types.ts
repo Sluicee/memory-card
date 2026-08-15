@@ -37,6 +37,10 @@ export interface Clip {
   width: number;
   height: number;
   search_index: string;
+  /** ffmpeg's codec names, filled in by the scanner. Absent on clips scanned
+   *  before these were recorded — see isRemuxable in stores/clips.ts. */
+  video_codec?: string | null;
+  audio_codec?: string | null;
 }
 
 export interface EqualizerSettings {

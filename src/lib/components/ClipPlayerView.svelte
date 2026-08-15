@@ -5,6 +5,7 @@
     buildClipStreamUrl,
     prepareClipPlayback,
     computePlaybackBox,
+    isRemuxable,
     PLAYBACK_BOUND_MIN,
     PLAYBACK_BOUND_MAX,
   } from "$lib/stores/clips";
@@ -247,7 +248,16 @@
   // restarts: load, one frame, load again, until the size finally settled.
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // A stream copy ignores the requested size, so re-requesting one buys
+  // nothing and costs a reload plus a jump back to the previous keyframe.
+  //
+  // svelte-ignore state_referenced_locally -- decided once on purpose: `clip`
+  // is fixed for this component's lifetime and its codecs cannot change while
+  // it plays, same as clipDurationVal above.
+  const remuxed = isRemuxable(clip);
+
   function handleStageResize() {
+    if (remuxed) return;
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
@@ -268,6 +278,7 @@
   // different one. Called when playback starts, which is when a resize that
   // arrived too early to act on becomes actionable.
   function applyPendingBox() {
+    if (remuxed) return;
     if (box.w === servedBox.w && box.h === servedBox.h) return;
     doSeek(absolutePosition, box);
   }
