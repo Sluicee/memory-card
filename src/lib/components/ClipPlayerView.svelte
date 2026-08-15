@@ -149,6 +149,14 @@
   // served costs nothing.
   let servedBox = { w: 0, h: 0 };
 
+  // True for the whole of a seek, which now spans the teardown, a fresh
+  // request, and the wait for its first frame. The teardown pauses the
+  // element, and without this that pause would read as the user having
+  // paused: the transport button would say "Play" for the couple of seconds a
+  // seek takes on the transcode path.
+  let seeking = false;
+  let seekToken = 0;
+
   async function doSeek(secs: number, targetBox: { w: number; h: number } = box) {
     // Set *before* load(), not left to the native `waiting` event — that
     // event is for stalling mid-playback when data runs out, not
@@ -160,7 +168,14 @@
     buffering = true;
     seekBaseSecs = secs;
     playedSecs = 0;
-    const wasPlaying = !videoEl.paused;
+    // Taken from our own state, not from the element: a seek still in flight
+    // may have paused it (the teardown below), and reading that back would
+    // make this seek think the user had paused and skip its own play().
+    const wasPlaying = isPlaying;
+    // Marks this as the newest seek. An older one that is still awaiting its
+    // first frame — up to 10s — must not resume playback over this one.
+    const token = ++seekToken;
+    seeking = true;
     servedBox = targetBox;
 
     // Tear the old stream down *before* asking for the new one — the same
@@ -175,15 +190,20 @@
     videoEl.removeAttribute("src");
     videoEl.load();
 
-    videoEl.src = await buildClipStreamUrl(clip.path, secs, targetBox);
-    videoEl.load();
-    if (wasPlaying) {
-      await waitForFirstFrame(videoEl);
-      try {
-        await videoEl.play();
-      } catch {
-        /* autoplay/interrupted-play rejection — harmless, user can hit play */
+    try {
+      videoEl.src = await buildClipStreamUrl(clip.path, secs, targetBox);
+      videoEl.load();
+      if (wasPlaying) {
+        await waitForFirstFrame(videoEl);
+        if (token !== seekToken) return;
+        try {
+          await videoEl.play();
+        } catch {
+          /* autoplay/interrupted-play rejection — harmless, user can hit play */
+        }
       }
+    } finally {
+      if (token === seekToken) seeking = false;
     }
   }
 
@@ -234,9 +254,22 @@
       const nextBox = computePlaybackBox(clip, measureTargetRect());
       if (nextBox.w === servedBox.w && nextBox.h === servedBox.h) return;
       box = nextBox;
+      // Before playback has begun there is no position to seek back to, so the
+      // request waits for `started` — see applyPendingBox, which is what makes
+      // it happen. Dropping it here instead would strand the stream at the old
+      // size for the rest of the clip: the stage has settled by then, so no
+      // further resize is coming to retry it.
       if (!started) return;
       doSeek(absolutePosition, nextBox);
     }, 700);
+  }
+
+  // Requests the current target size if the stream is still being served at a
+  // different one. Called when playback starts, which is when a resize that
+  // arrived too early to act on becomes actionable.
+  function applyPendingBox() {
+    if (box.w === servedBox.w && box.h === servedBox.h) return;
+    doSeek(absolutePosition, box);
   }
 
   $effect(() => {
@@ -291,12 +324,26 @@
   }
 
   // Backstop for a drag that ends without the bar hearing about it — a lost
-  // pointer capture, or a pointercancel from the compositor. Without this the
-  // component would sit with isDragging stuck true, showing a drag position
-  // that never becomes a seek.
-  function onWindowPointerEnd(event: PointerEvent) {
+  // pointer capture, for instance. Without this the component would sit with
+  // isDragging stuck true, showing a drag position that never becomes a seek.
+  function onWindowPointerUp(event: PointerEvent) {
     if (!isDragging || activePointerId !== event.pointerId) return;
     void handlePointerUp(event);
+  }
+
+  // A cancel is the interaction being taken away — the compositor claimed the
+  // pointer, the device went away — not the user letting go somewhere. It must
+  // abandon the drag rather than commit it: the coordinate such an event
+  // carries is not a position the user chose, and a stale or zero clientX
+  // would clamp to the very start of the clip.
+  function onWindowPointerCancel(event: PointerEvent) {
+    if (!isDragging || activePointerId !== event.pointerId) return;
+    isDragging = false;
+    activePointerId = null;
+    if (barEl?.hasPointerCapture(event.pointerId)) {
+      barEl.releasePointerCapture(event.pointerId);
+    }
+    onMouseMove();
   }
 
   let canSeek = $derived(clipDurationVal > 0);
@@ -310,6 +357,9 @@
   // re-triggered visibility.
   let controlsVisible = $state(true);
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  // onMount continues past several awaits; this is how the tail of it knows
+  // the component is already gone.
+  let destroyed = false;
   let rootEl = $state<HTMLDivElement | null>(null);
 
   function onMouseMove() {
@@ -336,6 +386,7 @@
   function onPlaying() {
     buffering = false;
     started = true;
+    applyPendingBox();
   }
 
   // Fires once the frame at the current position is actually decoded and
@@ -345,6 +396,7 @@
   function onLoadedData() {
     buffering = false;
     started = true;
+    applyPendingBox();
   }
 
   function onPlayEvt() {
@@ -352,10 +404,23 @@
   }
 
   function onPauseEvt() {
+    // Ignore the pause a seek performs on itself; see `seeking`.
+    if (seeking) return;
     isPlaying = false;
   }
 
   onMount(async () => {
+    // Registered before anything is awaited, and so before onDestroy can
+    // possibly run. They used to be set up at the end of this function, past
+    // an await that can hold for up to ten seconds waiting on a first frame:
+    // closing the clip during that window ran onDestroy first, whose removals
+    // found nothing registered, and the continuation then attached a pair of
+    // window listeners with no owner left to detach them. Every open/close
+    // cycle leaked another pair, each keeping this component and its video
+    // element alive.
+    window.addEventListener("pointerup", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerCancel);
+
     await prepareClipPlayback();
 
     // Real measurement now that .stage actually exists and is laid out —
@@ -389,14 +454,15 @@
       /* autoplay rejection — user can hit play */
     }
 
-    hideTimer = setTimeout(() => (controlsVisible = false), 2500);
-    window.addEventListener("pointerup", onWindowPointerEnd);
-    window.addEventListener("pointercancel", onWindowPointerEnd);
+    // Same hazard as the listeners above: this runs after awaits, so it must
+    // not arm a timer that would outlive the component and write to its state.
+    if (!destroyed) onMouseMove();
   });
 
   onDestroy(() => {
-    window.removeEventListener("pointerup", onWindowPointerEnd);
-    window.removeEventListener("pointercancel", onWindowPointerEnd);
+    destroyed = true;
+    window.removeEventListener("pointerup", onWindowPointerUp);
+    window.removeEventListener("pointercancel", onWindowPointerCancel);
     if (stallTimer) clearTimeout(stallTimer);
     if (hideTimer) clearTimeout(hideTimer);
     if (resizeTimer) clearTimeout(resizeTimer);

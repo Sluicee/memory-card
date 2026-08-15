@@ -35,18 +35,6 @@ const VIDEO_CODEC_PROBES: Array<{ family: string; mimeCodec: string }> = [
   { family: 'av1', mimeCodec: 'video/webm; codecs="av01.0.05M.08"' },
 ];
 
-// canPlayType() answers for whatever engine is actually running, which is
-// exactly right on Windows (WebView2 decodes AV1 itself) and exactly wrong on
-// Linux for AV1 specifically: dav1ddec is present, so the probe says
-// "probably", but its frames reach the compositor as a flat green rectangle —
-// an empty texture. Retested against every rendering configuration this app
-// has used, including with WEBKIT_GST_DMABUF_SINK_DISABLED off, and it
-// survives all of them. It cannot be worked around by depending on another
-// decoder either: there is no other AV1 decoder for GStreamer (gst-libav
-// ships none, and nvav1dec needs hardware AV1 decode).
-//
-// So the exclusion is Linux-only, and costs those clips a transcode. Windows
-// takes the remux path, which is near-free.
 // canPlayType() answers for whatever engine is running — right on Windows,
 // where WebView2 decodes AV1 itself, and wrong on Linux for AV1 specifically.
 // dav1ddec is present so the probe says "probably", but its frames are read
